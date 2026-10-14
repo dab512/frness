@@ -171,6 +171,7 @@ export async function createWriterRig(
     assemblies,
     assembly,
     linker,
+    registry,
     ledger,
     async close() {
       store.close();

@@ -27,6 +27,7 @@ export const error = object({
   retryable: { type: "boolean" },
 });
 const nullableError = { anyOf: [error, { type: "null" }] };
+const versioned = object({ object: objectRef, revision: string });
 export const command: JsonSchema = {
   anyOf: [
     object(
@@ -96,6 +97,18 @@ export const executionSchemas: Readonly<Record<string, JsonSchema>> = {
       type: "object",
       additionalProperties: { enum: ["callChild", "effect", "awaitInput"] },
     },
+    initialState: {},
+    initialDigest: string,
+    trace: {
+      type: "array",
+      maxItems: 10000,
+      items: object({
+        inbox: versioned,
+        commands: objectRef,
+        stateDigest: string,
+        commandDigest: string,
+      }),
+    },
   }),
   InputReceived: object({ invocation: objectRef, operation: operationRef, input: json }),
   ChildCompleted: object({ commandId: string, output: json }),
@@ -118,4 +131,10 @@ export const executionSchemas: Readonly<Record<string, JsonSchema>> = {
   ControlReceipt: object({ command: { enum: ["pause", "resume", "cancel"] }, snapshot: {} }),
   InputProvided: object({ commandId: string, input: {} }),
   InputDelivery: object({ invocation: objectRef, commandId: string, input: {}, inbox: objectRef }),
+  ReplayFrame: object({
+    source: objectRef,
+    position: { type: "integer", minimum: 0 },
+    state: {},
+    result: {},
+  }),
 };

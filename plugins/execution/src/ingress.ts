@@ -58,6 +58,14 @@ interface InvocationState {
   inboxIds: string[];
   awaitingInputs: Record<string, TypeRef>;
   pendingKinds: Record<string, "callChild" | "effect" | "awaitInput">;
+  initialState: Json;
+  initialDigest: string;
+  trace: {
+    inbox: { object: ObjectRef; revision: string };
+    commands: ObjectRef;
+    stateDigest: string;
+    commandDigest: string;
+  }[];
 }
 interface Inbox {
   invocation: ObjectRef;
@@ -236,6 +244,9 @@ export class ExecutionService {
           inboxIds: ["input"],
           awaitingInputs: {},
           pendingKinds: {},
+          initialState: state,
+          initialDigest: `sha256:${hash(state)}`,
+          trace: [],
         }),
       },
       {
@@ -499,6 +510,15 @@ export class ExecutionService {
                 ),
               ),
             },
+            trace: [
+              ...state.trace,
+              {
+                inbox: { object: inboxRecord.object, revision: inboxRecord.revision },
+                commands: this.#associated("Commands", invocation, inboxId),
+                stateDigest: `sha256:${hash(result.state)}`,
+                commandDigest: `sha256:${hash(result.commands)}`,
+              },
+            ],
           }),
         },
         {
@@ -517,6 +537,31 @@ export class ExecutionService {
     });
     if (hasEffects) await this.#options.cut?.("after_prepare_commit");
     else await this.#options.cut?.("after_reduce_commit");
+  }
+  async resume(invocation: ObjectRef, key: string): Promise<InvocationSnapshot> {
+    this.#assertInvocation(invocation);
+    const state = (await this.#read(this.#associated("State", invocation)))
+      .value as unknown as InvocationState;
+    const request = (await this.#read(state.request)).value as unknown as InvocationRequest;
+    try {
+      const pinned = this.#resolve(request);
+      if (
+        definitionKey(pinned.instance.implementation) !== definitionKey(state.implementation) ||
+        canonicalJson(pinned.instance.configuration) !== canonicalJson(state.configuration)
+      )
+        throw new Error("Pinned configuration changed");
+      const module = this.#options.reducer(state.implementation);
+      if (typeof module.initialize !== "function" || typeof module.reduce !== "function")
+        throw new Error("Pinned module is not available");
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "CAPABILITY_DENIED")
+        throw error;
+      throw executionError(
+        "PINNED_DEPENDENCY_MISSING",
+        "Cannot resume without the pinned schemas, assembly and reducer",
+      );
+    }
+    return this.controls.apply(invocation, "resume", key);
   }
   async provideInput(
     invocation: ObjectRef,
