@@ -1,0 +1,508 @@
+import { createHash } from "node:crypto";
+import { canonicalJson, freezeJson } from "../../../packages/abi/src/json.js";
+import { definitionKey } from "../../../packages/abi/src/references.js";
+import type {
+  Assembly,
+  ComponentInstance,
+  ContractDefinition,
+  DefinitionRef,
+  ExecutionContext,
+  ImplementationDefinition,
+  InvocationReceipt,
+  InvocationRequest,
+  InvocationSnapshot,
+  Json,
+  ObjectRecord,
+  ObjectRef,
+  ObjectStore,
+  ProtocolError,
+  RecordWrite,
+  ReducerCommand,
+  ReducerEvent,
+  ReducerModule,
+  TypeRef,
+} from "../../../specs/fractal-harness/contracts.js";
+import { executionError, initialize, type ReducerValidation, transition } from "./reducer.js";
+
+interface RegistryCapability {
+  get(ref: DefinitionRef): { readonly value: Json };
+  validate(type: TypeRef, value: unknown): void;
+}
+export interface ExecutionOptions {
+  readonly store: ObjectStore;
+  readonly context: ExecutionContext;
+  readonly storeId: string;
+  readonly namespaceId: string;
+  readonly registry: RegistryCapability;
+  readonly types: (name: string) => TypeRef;
+  readonly assembly: (revision: string) => Assembly;
+  readonly reducer: (implementation: DefinitionRef) => ReducerModule;
+}
+interface InvocationState {
+  invocation: ObjectRef;
+  request: ObjectRef;
+  implementation: DefinitionRef;
+  configuration: Json;
+  state: Json;
+  steps: number;
+  pendingCommands: string[];
+  issuedCommands: string[];
+}
+interface Inbox {
+  invocation: ObjectRef;
+  event: ReducerEvent;
+  consumed: boolean;
+  error: ProtocolError | null;
+}
+interface CommandRecord {
+  invocation: ObjectRef;
+  eventId: string;
+  commands: ReducerCommand[];
+}
+interface ChildLink {
+  parent: ObjectRef;
+  commandId: string;
+  child: ObjectRef;
+  delivered: boolean;
+}
+type MutableSnapshot = { -readonly [K in keyof InvocationSnapshot]: InvocationSnapshot[K] };
+const hash = (value: unknown): string =>
+  createHash("sha256").update(canonicalJson(value)).digest("hex");
+const json = (value: unknown): Json => JSON.parse(canonicalJson(value)) as Json;
+const terminal = (snapshot: InvocationSnapshot): boolean =>
+  ["succeeded", "failed", "cancelled"].includes(snapshot.phase);
+
+export class ExecutionService {
+  readonly #options: ExecutionOptions;
+  constructor(options: ExecutionOptions) {
+    this.#options = { ...options, context: freezeJson(structuredClone(options.context)) };
+  }
+  #ref(type: string, id: string): ObjectRef {
+    return {
+      storeId: this.#options.storeId,
+      namespaceId: this.#options.namespaceId,
+      objectId: `${type}/${id}`,
+      type: this.#options.types(type),
+    };
+  }
+  #assertInvocation(ref: ObjectRef): void {
+    if (
+      ref.storeId !== this.#options.storeId ||
+      ref.namespaceId !== this.#options.namespaceId ||
+      definitionKey(ref.type) !== definitionKey(this.#options.types("Invocation"))
+    )
+      throw executionError("CAPABILITY_DENIED", "Invocation is not accessible");
+  }
+  #associated(type: string, invocation: ObjectRef, suffix = ""): ObjectRef {
+    this.#assertInvocation(invocation);
+    return this.#ref(type, `${invocation.objectId}${suffix ? `/${suffix}` : ""}`);
+  }
+  #read(ref: ObjectRef): Promise<ObjectRecord> {
+    return this.#options.store.read(this.#options.context, ref);
+  }
+  async #maybeRead(ref: ObjectRef): Promise<ObjectRecord | undefined> {
+    try {
+      return await this.#read(ref);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && error.code === "NOT_FOUND") return undefined;
+      throw error;
+    }
+  }
+  #resolve(request: InvocationRequest): {
+    assembly: Assembly;
+    instance: ComponentInstance;
+    implementation: ImplementationDefinition;
+    validation: ReducerValidation;
+  } {
+    const assembly = this.#options.assembly(request.assemblyRevision);
+    if (assembly.revision !== request.assemblyRevision)
+      throw executionError("PINNED_DEPENDENCY_MISSING", "Assembly revision does not match");
+    const instance = assembly.instances.find(
+      (item) => item.instanceId === request.targetInstanceId,
+    );
+    if (!instance || instance.scopeId !== this.#options.context.scopeId)
+      throw executionError("CAPABILITY_DENIED", "Target is outside the scope");
+    const implementation = this.#options.registry.get(instance.implementation)
+      .value as unknown as ImplementationDefinition;
+    if (implementation.abi !== "reducer.v1")
+      throw executionError("UNKNOWN_ABI", "Target is not a reducer");
+    if (
+      !implementation.contracts.some(
+        (ref) => definitionKey(ref) === definitionKey(request.operation.contract),
+      )
+    )
+      throw executionError("CONTRACT_MISMATCH", "Operation contract is not exported by target");
+    if (
+      implementation.requiredCapabilities.some(
+        (grant) => !this.#options.context.grants.includes(grant),
+      )
+    )
+      throw executionError("CAPABILITY_DENIED", "Required capability is missing");
+    const contract = this.#options.registry.get(request.operation.contract)
+      .value as unknown as ContractDefinition;
+    const operation = contract.operations[request.operation.operation];
+    if (!operation) throw executionError("INVALID_INPUT", "Operation does not exist");
+    this.#options.registry.validate(operation.input, request.input);
+    this.#options.registry.validate(implementation.configurationType, instance.configuration);
+    return {
+      assembly,
+      instance,
+      implementation,
+      validation: {
+        validate: (type, value) => this.#options.registry.validate(type, value),
+        stateType: implementation.stateType,
+        outputType: operation.output,
+        commandType: this.#options.types("Command"),
+      },
+    };
+  }
+  async submit(input: InvocationRequest): Promise<InvocationReceipt> {
+    this.#options.registry.validate(this.#options.types("Request"), input);
+    const request = freezeJson(structuredClone(input));
+    const resolved = this.#resolve(request);
+    const id = hash([
+      this.#options.context.principalId,
+      this.#options.context.scopeId,
+      request.assemblyRevision,
+      request.targetInstanceId,
+      request.operation,
+      request.idempotencyKey,
+    ]);
+    const receiptRef = this.#ref("Receipt", id);
+    const previous = await this.#maybeRead(receiptRef);
+    if (previous) {
+      const receipt = previous.value as unknown as InvocationReceipt;
+      if (canonicalJson((await this.#read(receipt.request)).value) !== canonicalJson(request))
+        throw executionError("IDEMPOTENCY_CONFLICT", "Invocation key has a different payload");
+      return receipt;
+    }
+    const state = initialize(
+      this.#options.reducer(resolved.instance.implementation),
+      request.input,
+      resolved.instance.configuration,
+      resolved.validation,
+    );
+    const receipt: InvocationReceipt = {
+      request: this.#ref("Request", id),
+      invocation: this.#ref("Invocation", id),
+    };
+    const snapshot: InvocationSnapshot = {
+      ref: receipt.invocation,
+      phase: "queued",
+      control: "running",
+      waitingReason: null,
+      unresolvedEffectIds: [],
+      result: null,
+      error: null,
+    };
+    const event: ReducerEvent = {
+      eventId: hash([id, "input"]),
+      type: this.#options.types("InputReceived"),
+      value: json({
+        invocation: receipt.invocation,
+        operation: request.operation,
+        input: request.input,
+      }),
+    };
+    const writes: RecordWrite[] = [
+      { kind: "create", object: receipt.request, value: json(request) },
+      { kind: "create", object: receipt.invocation, value: json(snapshot) },
+      {
+        kind: "create",
+        object: this.#associated("State", receipt.invocation),
+        value: json({
+          invocation: receipt.invocation,
+          request: receipt.request,
+          implementation: resolved.instance.implementation,
+          configuration: resolved.instance.configuration,
+          state,
+          steps: 0,
+          pendingCommands: [],
+          issuedCommands: [],
+        }),
+      },
+      {
+        kind: "create",
+        object: this.#associated("Inbox", receipt.invocation, "input"),
+        value: json({ invocation: receipt.invocation, event, consumed: false, error: null }),
+      },
+      { kind: "create", object: receiptRef, value: json(receipt) },
+    ];
+    await this.#options.store.commit(this.#options.context, {
+      commitKey: `submit/${id}`,
+      readSet: [],
+      writes,
+      events: [event],
+    });
+    return receipt;
+  }
+  async snapshot(invocation: ObjectRef): Promise<InvocationSnapshot> {
+    this.#assertInvocation(invocation);
+    return (await this.#read(invocation)).value as unknown as InvocationSnapshot;
+  }
+  async state(invocation: ObjectRef): Promise<Json> {
+    return (
+      (await this.#read(this.#associated("State", invocation))).value as unknown as InvocationState
+    ).state;
+  }
+  async inbox(invocation: ObjectRef, id: string): Promise<Inbox> {
+    return (await this.#read(this.#associated("Inbox", invocation, id))).value as unknown as Inbox;
+  }
+  async commands(invocation: ObjectRef, id: string): Promise<readonly ReducerCommand[]> {
+    const record = await this.#maybeRead(this.#associated("Commands", invocation, id));
+    return record ? (record.value as unknown as CommandRecord).commands : [];
+  }
+  #childRequest(
+    request: InvocationRequest,
+    command: Extract<ReducerCommand, { kind: "callChild" }>,
+    invocation: ObjectRef,
+  ): InvocationRequest {
+    const resolved = this.#resolve(request);
+    const slot = resolved.implementation.slots.find((item) => item.name === command.slot);
+    if (!slot) throw executionError("UNKNOWN_SLOT", "Child slot does not exist");
+    if (
+      (slot.collection === "single" &&
+        (command.childKey !== undefined || command.childOrder !== undefined)) ||
+      (slot.collection === "keyed" && (!command.childKey || command.childOrder !== undefined)) ||
+      (slot.collection === "ordered" &&
+        (command.childOrder === undefined || command.childKey !== undefined))
+    )
+      throw executionError("INVALID_INPUT", "Child selector does not match slot");
+    const binding = resolved.assembly.bindings.find(
+      (item) =>
+        item.parentInstanceId === request.targetInstanceId &&
+        item.slot === command.slot &&
+        (slot.collection === "single" ||
+          (slot.collection === "keyed"
+            ? item.key === command.childKey
+            : item.order === command.childOrder)),
+    );
+    if (!binding) throw executionError("CAPABILITY_DENIED", "No connected child at selector");
+    const child: InvocationRequest = {
+      targetInstanceId: binding.childInstanceId,
+      assemblyRevision: request.assemblyRevision,
+      operation: { contract: slot.accepts, operation: command.operation },
+      input: command.input,
+      idempotencyKey: `child/${invocation.objectId}/${command.commandId}`,
+    };
+    this.#resolve(child);
+    return child;
+  }
+  async step(invocation: ObjectRef, inboxId: string): Promise<void> {
+    this.#assertInvocation(invocation);
+    const inboxRecord = await this.#read(this.#associated("Inbox", invocation, inboxId));
+    const inbox = inboxRecord.value as unknown as Inbox;
+    if (inbox.consumed) return;
+    const invocationRecord = await this.#read(invocation);
+    const snapshot = invocationRecord.value as unknown as InvocationSnapshot;
+    if (terminal(snapshot) || snapshot.control !== "running") return;
+    const stateRecord = await this.#read(this.#associated("State", invocation));
+    const state = stateRecord.value as unknown as InvocationState;
+    const requestRecord = await this.#read(state.request);
+    const request = requestRecord.value as unknown as InvocationRequest;
+    const resolved = this.#resolve(request);
+    if (
+      definitionKey(state.implementation) !== definitionKey(resolved.instance.implementation) ||
+      canonicalJson(state.configuration) !== canonicalJson(resolved.instance.configuration)
+    )
+      throw executionError(
+        "PINNED_DEPENDENCY_MISSING",
+        "Pinned implementation or configuration changed",
+      );
+    let result: ReturnType<typeof transition>;
+    try {
+      this.#options.registry.validate(inbox.event.type, inbox.event.value);
+      result = transition(
+        this.#options.reducer(state.implementation),
+        state.state,
+        inbox.event,
+        state.configuration,
+        resolved.validation,
+      );
+      for (const command of result.commands) {
+        if (command.kind === "callChild") this.#childRequest(request, command, invocation);
+        if (
+          command.kind === "complete" &&
+          (state.pendingCommands.length || snapshot.unresolvedEffectIds.length)
+        )
+          throw executionError("INVALID_COMMAND_BATCH", "Completion has unfinished work");
+        if (command.kind === "effect")
+          throw executionError("UNKNOWN_ABI", "Effect bridge is not installed");
+        if ("commandId" in command && state.issuedCommands.includes(command.commandId))
+          throw executionError("INVALID_COMMAND_BATCH", "Command identity was already issued");
+      }
+    } catch (error) {
+      const code =
+        error instanceof Error && "code" in error && typeof error.code === "string"
+          ? error.code
+          : "INVALID_OUTPUT";
+      const protocol: ProtocolError = {
+        code,
+        message: "Reducer transition rejected",
+        details: null,
+        retryable: false,
+      };
+      const failure = { ...snapshot, phase: "failed", waitingReason: null, error: protocol };
+      await this.#options.store.commit(this.#options.context, {
+        commitKey: `poison/${inbox.event.eventId}`,
+        readSet: [{ object: stateRecord.object, revision: stateRecord.revision }],
+        events: [],
+        writes: [
+          {
+            kind: "replace",
+            object: invocation,
+            expectedRevision: invocationRecord.revision,
+            value: json(failure),
+          },
+          {
+            kind: "replace",
+            object: inboxRecord.object,
+            expectedRevision: inboxRecord.revision,
+            value: json({ ...inbox, consumed: true, error: protocol }),
+          },
+        ],
+      });
+      return;
+    }
+    const next: MutableSnapshot = { ...snapshot, phase: "active", waitingReason: null };
+    for (const command of result.commands) {
+      if (command.kind === "complete") {
+        next.phase = "succeeded";
+        next.result = command.output;
+      } else if (command.kind === "fail") {
+        next.phase = "failed";
+        next.error = command.error;
+      } else if (command.kind === "callChild") {
+        next.phase = "waiting";
+        next.waitingReason = "child";
+      } else if (command.kind === "awaitInput") {
+        next.phase = "waiting";
+        next.waitingReason = "input";
+      }
+    }
+    const pending = result.commands.flatMap((command) =>
+      "commandId" in command ? [command.commandId] : [],
+    );
+    await this.#options.store.commit(this.#options.context, {
+      commitKey: `step/${inbox.event.eventId}`,
+      readSet: [{ object: requestRecord.object, revision: requestRecord.revision }],
+      events: [],
+      writes: [
+        {
+          kind: "replace",
+          object: invocation,
+          expectedRevision: invocationRecord.revision,
+          value: json(next),
+        },
+        {
+          kind: "replace",
+          object: stateRecord.object,
+          expectedRevision: stateRecord.revision,
+          value: json({
+            ...state,
+            state: result.state,
+            steps: state.steps + 1,
+            pendingCommands: [...state.pendingCommands, ...pending],
+            issuedCommands: [...state.issuedCommands, ...pending],
+          }),
+        },
+        {
+          kind: "replace",
+          object: inboxRecord.object,
+          expectedRevision: inboxRecord.revision,
+          value: json({ ...inbox, consumed: true }),
+        },
+        {
+          kind: "create",
+          object: this.#associated("Commands", invocation, inboxId),
+          value: json({ invocation, eventId: inbox.event.eventId, commands: result.commands }),
+        },
+      ],
+    });
+  }
+  async startChild(
+    parent: ObjectRef,
+    inboxId: string,
+    commandId: string,
+  ): Promise<InvocationReceipt> {
+    const command = (await this.commands(parent, inboxId)).find(
+      (item) => "commandId" in item && item.commandId === commandId,
+    );
+    if (!command || command.kind !== "callChild")
+      throw executionError("INVALID_INPUT", "Command is not a child call");
+    const snapshot = await this.snapshot(parent);
+    if (terminal(snapshot) || snapshot.control !== "running")
+      throw executionError("CAPABILITY_DENIED", "Parent cannot start new work");
+    const state = (await this.#read(this.#associated("State", parent)))
+      .value as unknown as InvocationState;
+    const request = (await this.#read(state.request)).value as unknown as InvocationRequest;
+    const receipt = await this.submit(this.#childRequest(request, command, parent));
+    const link: ChildLink = { parent, commandId, child: receipt.invocation, delivered: false };
+    const linkRef = this.#associated("ChildLink", parent, commandId);
+    if (!(await this.#maybeRead(linkRef)))
+      await this.#options.store.commit(this.#options.context, {
+        commitKey: `link/${parent.objectId}/${commandId}`,
+        readSet: [],
+        events: [],
+        writes: [{ kind: "create", object: linkRef, value: json(link) }],
+      });
+    return receipt;
+  }
+  async deliverChild(parent: ObjectRef, commandId: string, child: ObjectRef): Promise<void> {
+    const linkRecord = await this.#read(this.#associated("ChildLink", parent, commandId));
+    const link = linkRecord.value as unknown as ChildLink;
+    if (canonicalJson(link.child) !== canonicalJson(child))
+      throw executionError("CAPABILITY_DENIED", "Child identity does not match link");
+    if (link.delivered) return;
+    const childRecord = await this.#read(child);
+    const childSnapshot = childRecord.value as unknown as InvocationSnapshot;
+    if (!terminal(childSnapshot)) throw executionError("INVALID_INPUT", "Child is not terminal");
+    const stateRecord = await this.#read(this.#associated("State", parent));
+    const state = stateRecord.value as unknown as InvocationState;
+    const event: ReducerEvent = {
+      eventId: hash([parent, commandId, "completed"]),
+      type: this.#options.types(
+        childSnapshot.phase === "succeeded" ? "ChildCompleted" : "ChildFailed",
+      ),
+      value:
+        childSnapshot.phase === "succeeded"
+          ? json({ commandId, output: childSnapshot.result })
+          : json({
+              commandId,
+              error: childSnapshot.error ?? {
+                code: "CANCELLED",
+                message: "Child was cancelled",
+                details: null,
+                retryable: false,
+              },
+            }),
+    };
+    await this.#options.store.commit(this.#options.context, {
+      commitKey: `deliver/${event.eventId}`,
+      readSet: [{ object: child, revision: childRecord.revision }],
+      events: [event],
+      writes: [
+        {
+          kind: "replace",
+          object: linkRecord.object,
+          expectedRevision: linkRecord.revision,
+          value: json({ ...link, delivered: true }),
+        },
+        {
+          kind: "replace",
+          object: stateRecord.object,
+          expectedRevision: stateRecord.revision,
+          value: json({
+            ...state,
+            pendingCommands: state.pendingCommands.filter((id) => id !== commandId),
+          }),
+        },
+        {
+          kind: "create",
+          object: this.#associated("Inbox", parent, `child:${commandId}`),
+          value: json({ invocation: parent, event, consumed: false, error: null }),
+        },
+      ],
+    });
+  }
+}
