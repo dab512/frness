@@ -13,6 +13,8 @@
     { "name": "@frness/tools", "path": "plugins/tools" },
     { "name": "@frness/agent", "path": "plugins/agent" },
     { "name": "@frness/agent-runtime", "path": "plugins/agent-runtime" },
+    { "name": "@frness/agent-limits", "path": "plugins/agent-limits" },
+    { "name": "@frness/agent-usage", "path": "plugins/agent-usage" },
     { "name": "@frness/memory", "path": "plugins/memory" },
     { "name": "@frness/ui", "path": "plugins/ui" },
     { "name": "@frness/question-answer", "path": "plugins/question-answer" },

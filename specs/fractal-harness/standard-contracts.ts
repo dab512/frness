@@ -1,5 +1,5 @@
 /** Data shapes supplied by standard plugins, not exported as domain classes by host. */
-import type { DefinitionRef, Json, ObjectRef, OperationRef, Revision, TypeRef, VersionedObjectRef } from "./contracts.js";
+import type { DefinitionRef, Json, ObjectRef, OperationRef, ProtocolError, Revision, TypeRef, VersionedObjectRef } from "./contracts.js";
 
 export interface Message {
   readonly role: "system" | "user" | "assistant" | "tool";
@@ -83,8 +83,6 @@ export interface AgentBackendCapabilities {
   readonly permissions: boolean;
   readonly interrupt: "turn" | "session" | "none";
   readonly nativeFork: boolean;
-  readonly usage: "reported" | "unavailable";
-  readonly enforceableLimits: readonly string[];
 }
 export interface NativeAgentSession {
   readonly adapter: DefinitionRef;
@@ -110,7 +108,7 @@ export type AgentRuntimeEvent = {
   | { readonly kind: "text"; readonly delta: string }
   | { readonly kind: "tool"; readonly toolId: string; readonly phase: "started" | "completed"; readonly value: Json }
   | { readonly kind: "permission"; readonly requestId: string; readonly actionDigest: string; readonly options: readonly { readonly id: string; readonly title: string }[]; readonly value: Json }
-  | { readonly kind: "usage"; readonly inputTokens: number | null; readonly outputTokens: number | null }
+  | { readonly kind: "provider"; readonly type: TypeRef; readonly value: Json }
   | { readonly kind: "terminal"; readonly status: "completed" | "failed" | "cancelled" | "unknown"; readonly result: Json; readonly errorCode: string | null }
 );
 export interface AgentPermissionDecision {
@@ -120,6 +118,10 @@ export interface AgentPermissionDecision {
   readonly actionDigest: string;
   readonly optionId: string;
 }
+/** Optional addon contracts. Backend records contain no usage counters or limit policy. */
+export type AgentLaunchDecision = { readonly kind: "allow" } | { readonly kind: "deny"; readonly error: ProtocolError };
+export interface AgentObservedEvent { readonly session: ObjectRef; readonly event: VersionedObjectRef }
+export interface AgentUsageSample { readonly source: VersionedObjectRef; readonly unit: string; readonly amount: number | null }
 export interface CreateInput { readonly value: Json }
 export interface UpdateInput { readonly object: ObjectRef; readonly expectedRevision: Revision; readonly value: Json }
 export interface AppendInput { readonly object: ObjectRef; readonly expectedRevision: Revision; readonly child: ObjectRef }

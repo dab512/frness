@@ -14,6 +14,7 @@
 - REQ-10: установка, обновление, диагностика и резервное копирование имеют воспроизводимые процедуры.
 - REQ-11: каждый плагин, включая системные, поддерживает hot reload без перезапуска host/web shell, с сохранением данных и откатом неудачного candidate.
 - REQ-12: CLI-агенты подключаются backend-плагинами с собственными типами/session storage, streaming, permissions, stop boundary и conservative recovery по [AGENT-BACKENDS.md](AGENT-BACKENDS.md); LLM-плагин для CLI-only сборки необязателен.
+- REQ-13: базовый CLI backend запускается без limits/usage/statistics. Эти функции определяют отдельные плагины со своей логикой, метатипами, namespaces и UI; подключение и замена происходят через объявленные слоты.
 
 ## Решение D01 — небольшой технический host
 

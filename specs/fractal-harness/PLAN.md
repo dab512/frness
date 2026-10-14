@@ -26,6 +26,8 @@
     plugins/api                  generic transport и subscriptions
     plugins/llm                  provider contracts и адаптер
     plugins/agent-runtime        внешние CLI/SDK/RPC агенты и native sessions
+    plugins/agent-limits         необязательные политики/ограничения CLI; launch gate и свой storage
+    plugins/agent-usage          необязательная статистика/usage; event observer и свой storage/UI
     plugins/tools                инструментальные типы и router
     plugins/agent                decision loop и verifier
     plugins/memory               recall/remember/provenance
