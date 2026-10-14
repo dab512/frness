@@ -101,6 +101,10 @@ export async function buildBootstrap(directory, options = {}) {
     lock.activations.push({ packageDigest: digest, exportName: activation });
     if (isReact) lock.activations.push({ packageDigest: digest, exportName: "activateReactView" });
   }
+  for (const factory of options.packages ?? []) {
+    const artifact = await factory(ref);
+    await writePackage(parseManifest(artifact.manifest), artifact.files);
+  }
   await writeFile(resolve(directory, "boot-lock.json"), `${JSON.stringify(lock, null, 2)}\n`);
   return lock;
 }

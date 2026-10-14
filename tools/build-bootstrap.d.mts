@@ -1,5 +1,16 @@
-import type { BootLock, PackageManifest } from "../packages/abi/src/index.js";
+import type { BootLock, DefinitionRef, PackageManifest } from "../packages/abi/src/index.js";
+
+interface PackageArtifact {
+  readonly manifest: PackageManifest;
+  readonly files: Readonly<Record<string, string | Uint8Array>>;
+}
+type PackageFactory = (
+  meta: (name: string) => DefinitionRef,
+) => PackageArtifact | Promise<PackageArtifact>;
 export function buildBootstrap(
   directory: string,
-  options?: { readonly metaManifest?: PackageManifest },
+  options?: {
+    readonly metaManifest?: PackageManifest;
+    readonly packages?: readonly PackageFactory[];
+  },
 ): Promise<BootLock>;
