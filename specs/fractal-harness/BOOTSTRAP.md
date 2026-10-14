@@ -185,6 +185,12 @@ Browser выполняет отдельную candidate activation только 
 
 ## 10. Обязательные тесты
 
+### Выдача capabilities нативным экспортам
+
+`FactoryContext.exported(implementation, instanceId?)` возвращает закреплённый export. Без instanceId действует прежний путь для чистых модулей. С instanceId daemon проверяет точное соответствие ImplementationRef экземпляру из application assembly и его собственные grants. Export может дополнительно объявить `bindCapabilities({registry, capability})`; результат обязан удовлетворять исходному ABI. Binder получает capabilities только этого instance. Выданные credential getters проверяют binding→instances при каждом обращении; секреты не входят в configuration, journal или snapshot. Это необязательный технический decorator, не новый предметный ABI.
+
+Binder не выполняет внешний запрос. Повторные execute/reconcile используют один bound export на instance и pinned implementation. Полученный export не заменяет опубликованные module exports и не меняет другие instances.
+
 | ID | Подготовка и действие | Точный оракул |
 | --- | --- | --- |
 | `META-001` | Загрузить минимальный seed из восьми определений, затем проверить их публичным meta-validator | Все восемь имеют resolved metaType `std.meta.Type`; self-validation проходит; в registry нет source local refs; неизвестные предметные типы не встроены в host |

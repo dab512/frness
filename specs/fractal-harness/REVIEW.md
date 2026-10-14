@@ -1,5 +1,7 @@
 # Ревью концепции фрактального харнеса
 
+Уточнение реализации FH-15: статический effect export не мог получить scoped credential getter от native composition root. BOOTSTRAP.md дополнен необязательным `bindCapabilities` decorator при разрешении export для точного application instance. Публичные `EffectAdapter.execute/reconcile` и сохранённый EffectDefinition не меняются. Права и credential bindings проверяются для целевого instance, без чтения process.env внутри предметного плагина. AT-015 проверяет успешный вызов и ноль сетевых запросов при binding, выданном другому instance.
+
 Уточнение реализации 2026-10-14: T4 требует в одном commit сохранить новую completion revision и ссылки Attempt.result/EffectResolution.result на неё. Изначальный ObjectStore выделял revision лишь после commit, поэтому такой batch было невозможно выразить. C05/RecordWrite дополнены необязательным заранее выделенным revision ID (непустая строка до 256 символов). Store проверяет отсутствие ID в истории до всех writes; тест AT-004 подтверждает идемпотентность и полный rollback при попытке повторного использования. Старые callers продолжают получать store-generated revisions. Разбиение T4 на два неатомарных commit не использовано.
 
 **Статус: решения зафиксированы в спецификации; реализация ещё не проверена.**
