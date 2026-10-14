@@ -1,0 +1,35 @@
+{
+  "name": "frness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x",
+    "npm": ">=11"
+  },
+  "workspaces": [
+    "packages/*",
+    "plugins/*",
+    "apps/*",
+    "specs/fractal-harness"
+  ],
+  "scripts": {
+    "scaffold": "node tools/scaffold.mjs",
+    "progress": "node tools/progress.mjs",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "spec:check": "npm run check --workspace fractal-harness-specification",
+    "check:boundaries": "node tools/check-boundaries.mjs",
+    "test:atom": "tsx --test",
+    "test": "tsx --test tests/atoms/*.test.ts",
+    "test:acceptance": "npm run test:acceptance --workspace fractal-harness-specification",
+    "verify": "node tools/verify.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "24.19.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "nodeMajor": 24,
+  "npmMinimumMajor": 11,
+  "typescript": "5.9.3",
+  "biome": "2.5.15",
+  "tsx": "4.23.15",
+  "nodeTypes": "24.19.2"
+}

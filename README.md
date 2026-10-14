@@ -23,3 +23,21 @@ npm run check --prefix specs/fractal-harness
 ```
 
 Проверяются TypeScript-контракты, Gherkin, ссылки, тестовые идентификаторы и зависимости этапов. Приёмочные тесты продукта требуют его реализации и отдельного адаптера; отсутствие адаптера завершается явной ошибкой.
+
+## Работа над реализацией
+
+```sh
+npm ci
+npm run verify -- --atom FH-00
+```
+
+Каждый этап имеет свой тест и проверяется вместе с lint, typecheck, спецификацией и границами зависимостей. Отсутствующий тест или невыполненная зависимость дают ошибку. Фактический прогресс хранится в [implementation-status.json](implementation-status.json), свидетельства — в verification/.
+
+```sh
+npm run progress -- begin FH-01
+npm run test:atom -- tests/atoms/FH-01.test.ts
+npm run verify -- --atom FH-01
+npm run progress -- done FH-01
+```
+
+Структура будущих модулей уже создана; наличие workspace не означает реализации его функций.

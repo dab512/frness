@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "workspaces": [
+    { "name": "@frness/abi", "path": "packages/abi" },
+    { "name": "@frness/host", "path": "packages/host" },
+    { "name": "@frness/acceptance-adapter", "path": "packages/acceptance-adapter" },
+    { "name": "@frness/meta", "path": "plugins/meta" },
+    { "name": "@frness/store-sqlite", "path": "plugins/store-sqlite" },
+    { "name": "@frness/lifecycle", "path": "plugins/lifecycle" },
+    { "name": "@frness/execution", "path": "plugins/execution" },
+    { "name": "@frness/api", "path": "plugins/api" },
+    { "name": "@frness/llm", "path": "plugins/llm" },
+    { "name": "@frness/tools", "path": "plugins/tools" },
+    { "name": "@frness/agent", "path": "plugins/agent" },
+    { "name": "@frness/memory", "path": "plugins/memory" },
+    { "name": "@frness/ui", "path": "plugins/ui" },
+    { "name": "@frness/question-answer", "path": "plugins/question-answer" },
+    { "name": "@frness/session", "path": "plugins/session" },
+    { "name": "@frness/tabs", "path": "plugins/tabs" },
+    { "name": "@frness/project", "path": "plugins/project" },
+    { "name": "@frness/fork", "path": "plugins/fork" },
+    { "name": "@frness/migrations", "path": "plugins/migrations" },
+    { "name": "@frness/daemon", "path": "apps/daemon" },
+    { "name": "@frness/web", "path": "apps/web" },
+    { "name": "@frness/cli", "path": "apps/cli" }
+  ]
+}
