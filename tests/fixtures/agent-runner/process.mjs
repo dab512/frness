@@ -13,12 +13,12 @@ if (mode === "invalid") {
   process.stderr.write("secret-token-must-not-be-returned");
   process.exitCode = 2;
 } else if (mode === "hold") {
-  process.stdout.write('{"kind":"ready"}\n');
   const timer = setInterval(() => {}, 1000);
   process.on("SIGINT", () => {
     clearInterval(timer);
     process.stdout.write('{"kind":"cancelled"}\n');
   });
+  process.stdout.write('{"kind":"ready"}\n');
 } else {
   const bytes = Buffer.from(
     `${JSON.stringify({ kind: "text", text: "Привет 🌲", prompt })}\n${JSON.stringify({ kind: "completed", result: "ok" })}\n`,
