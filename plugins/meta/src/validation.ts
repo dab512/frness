@@ -86,6 +86,22 @@ export function validateDescription(
 ): readonly ExportValidation[] {
   const engine = createSchemaEngine(description.definitions);
   const checks: ExportValidation[] = [];
+  const definitions = new Map(
+    description.definitions.map((definition) => [definitionKey(definition.ref), definition]),
+  );
+  function target(value: Json | undefined, kind: string): ResolvedDefinition {
+    const ref = dataObject(value) as unknown as DefinitionRef;
+    const definition = definitions.get(definitionKey(ref));
+    if (!definition)
+      throw Object.assign(new Error(`Missing referenced ${kind}`), {
+        code: "PINNED_DEPENDENCY_MISSING",
+      });
+    if (definition.metaType.packageId !== "std.meta" || definition.metaType.name !== kind)
+      throw Object.assign(new Error(`Reference must target ${kind}`), {
+        code: "CONTRACT_MISMATCH",
+      });
+    return definition;
+  }
   for (const definition of description.definitions) {
     assertJson(definition.value);
     const validator = engine.getSchema(
@@ -95,6 +111,7 @@ export function validateDescription(
       fail(`Invalid definition ${definition.name}: ${engine.errorsText(validator?.errors)}`);
     if (definition.metaType.packageId === "std.meta" && definition.metaType.name === "Type") {
       const type = dataObject(definition.value);
+      for (const reference of Object.values(dataObject(type.references))) target(reference, "Type");
       if (!engine.validateSchema(type.schema as JsonSchema))
         fail(`Invalid JSON schema ${definition.name}`);
     }
@@ -103,12 +120,52 @@ export function validateDescription(
       definition.metaType.name === "Implementation"
     ) {
       const value = dataObject(definition.value);
+      for (const reference of value.contracts as readonly Json[]) target(reference, "Contract");
+      target(value.configurationType, "Type");
+      target(value.stateType, "Type");
+      for (const slot of value.slots as readonly Json[])
+        target(dataObject(slot).accepts, "Contract");
       const abi = value.abi;
       const entry = value.entry;
       if (typeof abi !== "string" || !description.availableAbis?.includes(abi))
         throw Object.assign(new Error(`Unknown ABI ${String(abi)}`), { code: "UNKNOWN_ABI" });
       if (typeof entry !== "string") fail("Invalid implementation entry");
+      const owner = description.packages.find((item) => item.digest === definition.ref.digest);
+      if (!owner?.source.exports[entry])
+        throw Object.assign(new Error("Missing implementation export"), {
+          code: "PINNED_DEPENDENCY_MISSING",
+        });
       checks.push({ packageDigest: definition.ref.digest, entry, abi });
+    }
+    if (definition.metaType.packageId === "std.meta" && definition.metaType.name === "Contract") {
+      const value = dataObject(definition.value);
+      for (const operation of Object.values(dataObject(value.operations))) {
+        target(dataObject(operation).input, "Type");
+        target(dataObject(operation).output, "Type");
+      }
+      for (const reference of value.allowedEffects as readonly Json[])
+        target(reference, "Contract");
+      const suite = target(value.conformanceSuite, "ConformanceSuite");
+      if (
+        definitionKey(dataObject(suite.value).targetContract as unknown as DefinitionRef) !==
+        definitionKey(definition.ref)
+      )
+        fail("Conformance suite targets a different contract");
+    }
+    if (
+      definition.metaType.packageId === "std.meta" &&
+      definition.metaType.name === "ConformanceSuite"
+    ) {
+      const value = dataObject(definition.value);
+      target(value.targetContract, "Contract");
+      const owner = description.packages.find((item) => item.digest === definition.ref.digest);
+      if (
+        typeof value.entry !== "string" ||
+        owner?.source.exports[value.entry]?.environment !== "server"
+      )
+        throw Object.assign(new Error("Missing conformance export"), {
+          code: "PINNED_DEPENDENCY_MISSING",
+        });
     }
   }
   for (const owner of description.packages) {
