@@ -20,3 +20,7 @@ CREATE TABLE IF NOT EXISTS cursors (
   token TEXT PRIMARY KEY, sequence INTEGER NOT NULL,
   principal TEXT NOT NULL, owner TEXT NOT NULL, scope TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS subscription_cursors (
+  token TEXT PRIMARY KEY, namespace TEXT NOT NULL, sequence INTEGER NOT NULL,
+  principal TEXT NOT NULL, owner TEXT NOT NULL, scope TEXT NOT NULL, issued_at INTEGER NOT NULL
+);

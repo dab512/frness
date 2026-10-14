@@ -6,12 +6,14 @@ import type {
   CommitBatch,
   CommitReceipt,
   ExecutionContext,
+  Json,
   ObjectRecord,
   ObjectRef,
   ObjectStore,
   TypeRef,
   VersionedObjectRef,
 } from "../../../specs/fractal-harness/contracts.js";
+import type { StorageSubscription } from "./subscriptions.js";
 
 interface Namespace {
   owner: string;
@@ -33,16 +35,28 @@ export interface SqliteStoreOptions {
   readonly path: string;
   readonly storeId: string;
   readonly validate: (type: TypeRef, value: unknown) => void;
+  readonly project?: (type: TypeRef, value: Json) => Json;
+  readonly cursorLifetimeMs?: number;
+  readonly now?: () => number;
 }
 
 export class SqliteObjectStore implements ObjectStore {
   readonly storeId: string;
   #db: Database.Database;
   #validate: SqliteStoreOptions["validate"];
+  #project: NonNullable<SqliteStoreOptions["project"]>;
+  #now: () => number;
+  #cursorLifetime: number;
 
   constructor(options: SqliteStoreOptions) {
     this.storeId = options.storeId;
     this.#validate = options.validate;
+    this.#project =
+      options.project ?? (() => fail("CAPABILITY_DENIED", "Projection capability is unavailable"));
+    this.#now = options.now ?? Date.now;
+    this.#cursorLifetime = options.cursorLifetimeMs ?? 86400000;
+    if (!Number.isFinite(this.#cursorLifetime) || this.#cursorLifetime <= 0)
+      fail("INVALID_INPUT", "Cursor lifetime must be positive");
     this.#db = new Database(options.path);
     this.#db.pragma("journal_mode = WAL");
     this.#db.pragma("foreign_keys = ON");
@@ -106,6 +120,128 @@ export class SqliteObjectStore implements ObjectStore {
       .get(ref.namespaceId, ref.objectId, selected) as RevisionRow | undefined;
     if (!row || row.deleted) fail("SNAPSHOT_UNAVAILABLE", "Requested revision is unavailable");
     return { object: structuredClone(ref), revision: row.revision, value: JSON.parse(row.value) };
+  }
+
+  subscribe(input: ExecutionContext, namespaceId: string): StorageSubscription {
+    const context = structuredClone(input);
+    const authorize = () =>
+      this.#authorize(context, {
+        storeId: this.storeId,
+        namespaceId,
+        objectId: "",
+        type: {} as TypeRef,
+      });
+    authorize();
+    let closed = false;
+    const check = () => {
+      if (closed) fail("SUBSCRIPTION_CLOSED", "Subscription is closed");
+      authorize();
+    };
+    const cursor = (sequence: number): string => {
+      const token = randomUUID();
+      this.#db
+        .prepare(
+          "INSERT INTO subscription_cursors(token,namespace,sequence,principal,owner,scope,issued_at) VALUES(?,?,?,?,?,?,?)",
+        )
+        .run(
+          token,
+          namespaceId,
+          sequence,
+          context.principalId,
+          context.ownerInstanceId,
+          context.scopeId,
+          this.#now(),
+        );
+      return token;
+    };
+    const record = (objectId: string, row: RevisionRow): ObjectRecord => {
+      const type = JSON.parse(row.type_ref) as TypeRef;
+      const value = this.#project(type, JSON.parse(row.value) as Json);
+      assertJson(value);
+      return {
+        object: { storeId: this.storeId, namespaceId, objectId, type },
+        revision: row.revision,
+        value,
+      };
+    };
+    return {
+      snapshot: () => {
+        check();
+        return this.#db
+          .transaction(() => {
+            const rows = this.#db
+              .prepare(
+                "SELECT h.object_id,r.* FROM heads h JOIN revisions r ON h.namespace=r.namespace AND h.object_id=r.object_id AND h.revision=r.revision WHERE h.namespace=? AND h.deleted=0 ORDER BY h.object_id",
+              )
+              .all(namespaceId) as (RevisionRow & { object_id: string })[];
+            const sequence = (
+              this.#db
+                .prepare("SELECT COALESCE(MAX(sequence),0) AS sequence FROM changes")
+                .get() as { sequence: number }
+            ).sequence;
+            return {
+              cursor: cursor(sequence),
+              records: rows.map((row) => record(row.object_id, row)),
+            };
+          })
+          .immediate();
+      },
+      catchUp: (token) => {
+        check();
+        return this.#db
+          .transaction(() => {
+            const from = this.#db
+              .prepare("SELECT * FROM subscription_cursors WHERE token=?")
+              .get(token) as
+              | {
+                  namespace: string;
+                  sequence: number;
+                  principal: string;
+                  owner: string;
+                  scope: string;
+                  issued_at: number;
+                }
+              | undefined;
+            if (
+              !from ||
+              from.namespace !== namespaceId ||
+              from.principal !== context.principalId ||
+              from.owner !== context.ownerInstanceId ||
+              from.scope !== context.scopeId
+            )
+              fail("CAPABILITY_DENIED", "Cursor is not accessible");
+            if (this.#now() - from.issued_at > this.#cursorLifetime)
+              fail("CURSOR_EXPIRED", "Cursor has expired");
+            const rows = this.#db
+              .prepare(
+                "SELECT c.sequence,c.event_id,c.object_id,r.* FROM changes c JOIN revisions r ON c.namespace=r.namespace AND c.object_id=r.object_id AND c.revision=r.revision WHERE c.namespace=? AND c.sequence>? ORDER BY c.sequence",
+              )
+              .all(namespaceId, from.sequence) as (RevisionRow & {
+              sequence: number;
+              event_id: string;
+              object_id: string;
+            })[];
+            let previousCursor = token;
+            return rows.map((row) => {
+              const nextCursor = cursor(row.sequence);
+              const event = {
+                eventId: row.event_id,
+                previousCursor,
+                cursor: nextCursor,
+                value: JSON.parse(
+                  canonicalJson({ record: record(row.object_id, row), deleted: row.deleted === 1 }),
+                ) as Json,
+              };
+              previousCursor = nextCursor;
+              return event;
+            });
+          })
+          .immediate();
+      },
+      close: () => {
+        closed = true;
+      },
+    };
   }
 
   async commit(context: ExecutionContext, input: CommitBatch): Promise<CommitReceipt> {
