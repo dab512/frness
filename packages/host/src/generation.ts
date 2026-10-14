@@ -20,6 +20,7 @@ export class BootstrapGeneration {
   #cleanups: Cleanup[] = [];
   #closed = false;
   #published = false;
+  #exports = new Map<string, unknown>();
 
   constructor(generationId: string, description: BootstrapDescription) {
     this.generationId = generationId;
@@ -64,6 +65,19 @@ export class BootstrapGeneration {
   retainCleanup(cleanup: Cleanup): void {
     this.#cleanups.push(cleanup);
   }
+  retainExport(packageDigest: string, entry: string, value: unknown): void {
+    if (this.#closed || this.#published)
+      throw new HostError("CAPABILITY_DENIED", "Export scope is sealed");
+    this.#exports.set(JSON.stringify([packageDigest, entry]), value);
+  }
+  getExport(packageDigest: string, entry: string): unknown {
+    if (this.#closed || !this.#published)
+      throw new HostError("CAPABILITY_DENIED", "Generation is not available");
+    const value = this.#exports.get(JSON.stringify([packageDigest, entry]));
+    if (value === undefined)
+      throw new HostError("PINNED_DEPENDENCY_MISSING", "Server export is not loaded");
+    return value;
+  }
   hasAbi(id: string): boolean {
     return !this.#closed && this.#abis.has(id);
   }
@@ -104,5 +118,6 @@ export class BootstrapGeneration {
     this.#cleanups = [];
     this.#validators.clear();
     this.#abis.clear();
+    this.#exports.clear();
   }
 }

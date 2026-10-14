@@ -286,6 +286,40 @@ export class ExecutionService {
       (await this.#read(this.#associated("State", invocation))).value as unknown as InvocationState
     ).state;
   }
+  async workflow(): Promise<{
+    signature: string;
+    invocations: readonly { ref: ObjectRef; inboxIds: readonly string[] }[];
+  }> {
+    const index = await this.#maybeRead(this.#ref("InvocationIndex", "index"));
+    const objects = index ? (index.value as unknown as { objects: ObjectRef[] }).objects : [];
+    const invocations: { ref: ObjectRef; inboxIds: readonly string[] }[] = [];
+    const signature: unknown[] = [];
+    for (const ref of objects) {
+      const record = await this.#read(ref);
+      const snapshot = record.value as unknown as InvocationSnapshot;
+      const stateRecord = await this.#read(this.#associated("State", ref));
+      signature.push([ref, record.revision, stateRecord.revision]);
+      if (!terminal(snapshot) && snapshot.control === "running")
+        invocations.push({
+          ref,
+          inboxIds: (stateRecord.value as unknown as InvocationState).inboxIds,
+        });
+    }
+    return { invocations, signature: hash(signature) };
+  }
+  async pendingChildren(
+    invocation: ObjectRef,
+  ): Promise<readonly { inboxId: string; commandId: string }[]> {
+    const state = (await this.#read(this.#associated("State", invocation)))
+      .value as unknown as InvocationState;
+    if (!(await this.controls.guard(invocation)).allowed) return [];
+    const result: { inboxId: string; commandId: string }[] = [];
+    for (const inboxId of state.inboxIds)
+      for (const command of await this.commands(invocation, inboxId))
+        if (command.kind === "callChild" && state.pendingCommands.includes(command.commandId))
+          result.push({ inboxId, commandId: command.commandId });
+    return result;
+  }
   async inbox(invocation: ObjectRef, id: string): Promise<Inbox> {
     return (await this.#read(this.#associated("Inbox", invocation, id))).value as unknown as Inbox;
   }

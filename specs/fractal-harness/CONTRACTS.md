@@ -102,7 +102,7 @@ Transport стандартного api-плагина: POST /v1/invoke прин�
 
 Ошибки: JSON {code,message,details,retryable}. INVALID_INPUT=400, CAPABILITY_DENIED=403, NOT_FOUND=404, REVISION_CONFLICT/IDEMPOTENCY_CONFLICT=409, DEPENDENCY_UNAVAILABLE=503; остальные валидируемые ошибки 422. Ошибка внутри уже принятого invocation отражается в его состоянии и событии, не меняет ранее полученный HTTP receipt.
 
-CLI использует тот же API: invoke --instance ID --contract REF --operation NAME --input-file FILE --key KEY; inspect REF; observe --cursor CURSOR; plugin stage/activate/disable; assembly validate/run; backup/restore. Значения file args читаются как данные, не исполняются shell. Человек, CLI и агент с одинаковым правом получают одинаковую семантику операции.
+CLI использует тот же API: invoke --instance ID --assembly-revision REV --contract REF --operation NAME --input-file FILE --key KEY; inspect --ref-file FILE; observe --namespace NS --cursor CURSOR; plugin stage/activate/disable; assembly validate/run; backup/restore. Вместо JSON-аргумента --contract допускается --contract-file FILE. Значения file args читаются как данные, не исполняются shell. Человек, CLI и агент с одинаковым правом получают одинаковую семантику операции.
 
 SSE обеспечивает наблюдение, не запускает повторную обработку команд. Disconnect/unsubscribe не отменяет принятый invocation. Клиент после transport timeout повторяет тот же idempotencyKey и payload. Локальное управление pause/cancel/resume идёт отдельными описанными операциями.
 

@@ -85,6 +85,9 @@ export async function bootstrap(options: BootstrapOptions): Promise<BootstrapGen
       const path = await safeArtifactPath(artifact.directory, entry.path);
       module = await importModule(path);
       modules.set(key, module);
+      for (const [name, descriptor] of Object.entries(owner.source.exports))
+        if (descriptor.environment === "server" && descriptor.path === entry.path)
+          generation.retainExport(packageDigest, name, module[descriptor.exportName]);
     }
     return module[entry.exportName];
   }

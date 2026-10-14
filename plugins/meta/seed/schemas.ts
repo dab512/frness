@@ -80,7 +80,7 @@ export function seedManifest(): PackageManifest {
   return {
     format: 1,
     packageId: "std.meta",
-    version: "1.0.0",
+    version: "1.0.1",
     hostAbi: "fractal.host.v1",
     reload: { snapshotType: { local: "NullSnapshot" }, serverEntry: "reload", clientEntry: null },
     dependencies: [],
@@ -90,6 +90,12 @@ export function seedManifest(): PackageManifest {
       value: { schema, references: {} },
     })),
     exports: {
+      DefinitionRegistry: {
+        path: "server.mjs",
+        exportName: "DefinitionRegistry",
+        environment: "server",
+      },
+      AssemblyLinker: { path: "server.mjs", exportName: "AssemblyLinker", environment: "server" },
       activateMeta: { path: "server.mjs", exportName: "activateMeta", environment: "server" },
       reload: { path: "server.mjs", exportName: "reload", environment: "server" },
     },

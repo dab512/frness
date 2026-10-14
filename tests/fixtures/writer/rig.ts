@@ -10,6 +10,7 @@ import type { CrashCut } from "../../../plugins/execution/src/outbox.js";
 import { DurableOutbox } from "../../../plugins/execution/src/outbox.js";
 import { AssemblyLinker } from "../../../plugins/meta/src/linker.js";
 import { DefinitionRegistry } from "../../../plugins/meta/src/registry.js";
+import { redact } from "../../../plugins/store-sqlite/src/access.js";
 import { SqliteObjectStore } from "../../../plugins/store-sqlite/src/store.js";
 import type {
   Assembly,
@@ -17,8 +18,10 @@ import type {
   DefinitionRef,
   EffectAdapter,
   ExecutionContext,
+  Json,
   ReducerModule,
   RetryPolicy,
+  TypeRef,
 } from "../../../specs/fractal-harness/contracts.js";
 import { buildBootstrap } from "../../../tools/build-bootstrap.mjs";
 import { writerManifest } from "./manifest.js";
@@ -110,10 +113,13 @@ export async function createWriterRig(
     assemblyRevision: "v1",
     grants: [],
   };
+  const project = (type: TypeRef, value: Json) =>
+    redact(value, (registry.get(type).value as { readonly schema: Json }).schema);
   const store = new SqliteObjectStore({
     path: join(directory, "host.sqlite"),
     storeId: "local",
     validate: (type, value) => registry.validate(type, value),
+    project,
   });
   store.registerNamespace("runtime", "execution", "scope");
   const module = (await import(
@@ -172,6 +178,7 @@ export async function createWriterRig(
     assembly,
     linker,
     registry,
+    project,
     ledger,
     async close() {
       store.close();

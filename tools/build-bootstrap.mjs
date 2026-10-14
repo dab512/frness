@@ -19,7 +19,7 @@ async function bundle(entry, platform) {
     banner:
       platform === "node"
         ? {
-            js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+            js: "import { createRequire as __frnessCreateRequire } from 'node:module'; const require = __frnessCreateRequire(import.meta.url);",
           }
         : {},
   });
@@ -37,6 +37,7 @@ export async function buildBootstrap(directory, options = {}) {
       { code: "ARTIFACT_DESTINATION_NOT_EMPTY" },
     );
   const lock = { format: 1, hostAbi: "fractal.host.v1", packages: [], activations: [] };
+  const written = [];
   async function writePackage(manifest, files) {
     const target = resolve(directory, manifest.packageId);
     await mkdir(target, { recursive: true });
@@ -46,6 +47,7 @@ export async function buildBootstrap(directory, options = {}) {
     const digest = await computeArtifactDigest(target);
     await writeFile(resolve(target, "package.digest"), `${digest}\n`);
     lock.packages.push({ artifactPath: manifest.packageId, digest });
+    written.push({ manifest, digest });
     return digest;
   }
   const metaDigest = await writePackage(meta, {
@@ -102,8 +104,16 @@ export async function buildBootstrap(directory, options = {}) {
     if (isReact) lock.activations.push({ packageDigest: digest, exportName: "activateReactView" });
   }
   for (const factory of options.packages ?? []) {
-    const artifact = await factory(ref);
-    await writePackage(parseManifest(artifact.manifest), artifact.files);
+    const lookup = (packageId, name) => {
+      const owners = written.filter((item) => item.manifest.packageId === packageId);
+      if (owners.length !== 1) throw new Error(`Package lookup must be unambiguous: ${packageId}`);
+      const owner = owners[0];
+      return { packageId, packageVersion: owner.manifest.version, digest: owner.digest, name };
+    };
+    const artifact = await factory(ref, lookup);
+    const digest = await writePackage(parseManifest(artifact.manifest), artifact.files);
+    for (const exportName of artifact.activations ?? [])
+      lock.activations.push({ packageDigest: digest, exportName });
   }
   await writeFile(resolve(directory, "boot-lock.json"), `${JSON.stringify(lock, null, 2)}\n`);
   return lock;

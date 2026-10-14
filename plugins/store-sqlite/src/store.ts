@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import Database from "better-sqlite3";
+import { createRequire } from "node:module";
+import type Database from "better-sqlite3";
 import { assertJson, canonicalJson } from "../../../packages/abi/src/json.js";
 import type {
   CommitBatch,
@@ -35,6 +36,7 @@ export interface SqliteStoreOptions {
   readonly path: string;
   readonly storeId: string;
   readonly validate: (type: TypeRef, value: unknown) => void;
+  readonly database?: typeof Database;
   readonly project?: (type: TypeRef, value: Json) => Json;
   readonly cursorLifetimeMs?: number;
   readonly now?: () => number;
@@ -57,7 +59,9 @@ export class SqliteObjectStore implements ObjectStore {
     this.#cursorLifetime = options.cursorLifetimeMs ?? 86400000;
     if (!Number.isFinite(this.#cursorLifetime) || this.#cursorLifetime <= 0)
       fail("INVALID_INPUT", "Cursor lifetime must be positive");
-    this.#db = new Database(options.path);
+    const connect =
+      options.database ?? (createRequire(import.meta.url)("better-sqlite3") as typeof Database);
+    this.#db = new connect(options.path);
     this.#db.pragma("journal_mode = WAL");
     this.#db.pragma("foreign_keys = ON");
     this.#db.pragma("synchronous = FULL");
@@ -122,6 +126,11 @@ export class SqliteObjectStore implements ObjectStore {
     return { object: structuredClone(ref), revision: row.revision, value: JSON.parse(row.value) };
   }
 
+  project(type: TypeRef, value: Json): Json {
+    const projected = this.#project(type, value);
+    assertJson(projected);
+    return structuredClone(projected);
+  }
   subscribe(input: ExecutionContext, namespaceId: string): StorageSubscription {
     const context = structuredClone(input);
     const authorize = () =>

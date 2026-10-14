@@ -26,6 +26,8 @@ npm run check --prefix specs/fractal-harness
 
 ## Работа над реализацией
 
+[Локальный daemon/API/CLI и проверенные сценарии](docs/local-development.md).
+
 ```sh
 npm ci
 npm run verify -- --atom FH-00

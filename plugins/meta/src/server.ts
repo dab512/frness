@@ -2,6 +2,9 @@ import type { BootstrapRegistrationHost } from "../../../packages/abi/src/bootst
 import type { DefinitionRef, ReloadParticipant } from "../../../specs/fractal-harness/contracts.js";
 import { validateDescription } from "./validation.js";
 
+export { AssemblyLinker } from "./linker.js";
+export { DefinitionRegistry } from "./registry.js";
+
 let snapshotType: DefinitionRef | undefined;
 
 export function activateMeta(host: BootstrapRegistrationHost): () => void {
