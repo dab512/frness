@@ -1,0 +1,8 @@
+#!/usr/bin/env node
+let prompt = "";
+for await (const chunk of process.stdin) prompt += chunk.toString();
+const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
+emit({ type: "system", subtype: "init", session_id: "native-claude-session" });
+emit({ type: "stream_event", event: { delta: { type: "text_delta", text: prompt } } });
+emit({ type: "result", result: prompt, is_error: prompt === "fail", usage: { input_tokens: 12, output_tokens: 4 }, access_token: "must-be-redacted" });
+if (prompt === "fail") process.exitCode = 1;

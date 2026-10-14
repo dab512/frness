@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+let prompt = "";
+for await (const chunk of process.stdin) prompt += chunk.toString();
+const emit = value => process.stdout.write(`${JSON.stringify(value)}\n`);
+emit({ type: "thread.started", thread_id: "native-codex-session" });
+emit({ type: "item.completed", item: { id: "message", type: "agent_message", text: prompt } });
+if (prompt !== "missing-final") emit({ type: "turn.completed", usage: { input_tokens: 10, output_tokens: 3 }, authorization: "must-be-redacted" });
