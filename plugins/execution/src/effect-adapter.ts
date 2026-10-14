@@ -177,6 +177,23 @@ export class EffectBridge {
           );
         }),
       ]);
+      if (
+        outcome &&
+        outcome.kind !== "unknown" &&
+        outcome.actualUnits !== null &&
+        (!Number.isSafeInteger(outcome.actualUnits) || outcome.actualUnits < 0)
+      ) {
+        const evidence = {
+          invalidUsage: {
+            actualUnits: Number.isFinite(outcome.actualUnits)
+              ? outcome.actualUnits
+              : String(outcome.actualUnits),
+            reportedEvidence: outcome.evidence,
+          },
+        };
+        assertJson(evidence);
+        return { kind: "unknown", reason: "INVALID_USAGE", evidence };
+      }
       assertJson(outcome);
       if (!outcome || !["completed", "failed_known", "unknown"].includes(outcome.kind))
         return unknown("Invalid adapter outcome");

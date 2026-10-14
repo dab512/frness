@@ -107,7 +107,22 @@ test("AT-010 scoped invocation keys and pinned native retry windows preserve ori
         (await rig.store.read(rig.context, attempt.result.object, attempt.result.revision))
           .value as unknown as { outcome: EffectOutcome }
       ).outcome;
-      await rig.outbox.complete(originalRef, outcome);
+      const proof = (
+        outcome.evidence as unknown as {
+          originalReceipt: {
+            attemptId: string;
+            value: { externalId: string };
+            actualUnits: number;
+          };
+        }
+      ).originalReceipt;
+      assert.equal(proof.attemptId, originalAttempt.attemptId);
+      await rig.outbox.complete(originalRef, {
+        kind: "completed",
+        value: proof.value,
+        actualUnits: proof.actualUnits,
+        evidence: { ...proof },
+      });
       await rig.outbox.pump(rig.runtime);
       assert.equal((await rig.runtime.snapshot(receipt.invocation)).phase, "succeeded");
       assert.deepEqual((await rig.runtime.snapshot(receipt.invocation)).unresolvedEffectIds, []);

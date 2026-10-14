@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { bootstrap } from "../../../packages/host/src/bootstrap.js";
 import { executionManifest } from "../../../plugins/execution/definitions/manifest.js";
+import { BudgetLedger } from "../../../plugins/execution/src/budget.js";
 import { EffectBridge } from "../../../plugins/execution/src/effect-adapter.js";
 import { ExecutionService } from "../../../plugins/execution/src/ingress.js";
 import { DurableOutbox } from "../../../plugins/execution/src/outbox.js";
@@ -11,6 +12,7 @@ import { DefinitionRegistry } from "../../../plugins/meta/src/registry.js";
 import { SqliteObjectStore } from "../../../plugins/store-sqlite/src/store.js";
 import type {
   Assembly,
+  BudgetSpec,
   DefinitionRef,
   EffectAdapter,
   ExecutionContext,
@@ -20,7 +22,12 @@ import type {
 import { buildBootstrap } from "../../../tools/build-bootstrap.mjs";
 import { writerManifest } from "./manifest.js";
 
-export async function createWriterRig(directory: string, endpoint: string, policy: RetryPolicy) {
+export async function createWriterRig(
+  directory: string,
+  endpoint: string,
+  policy: RetryPolicy,
+  options: { readonly budget?: BudgetSpec; readonly maxUnits?: number } = {},
+) {
   const distribution = join(directory, "distribution");
   await buildBootstrap(distribution, {
     packages: [
@@ -107,6 +114,16 @@ export async function createWriterRig(directory: string, endpoint: string, polic
     account: () => "test-account",
     policy: () => policy,
   });
+  const ledger = options.budget
+    ? new BudgetLedger({
+        store,
+        context,
+        storeId: "local",
+        namespaceId: "runtime",
+        types: (name) => ref(name, "std.execution"),
+      })
+    : undefined;
+  if (ledger && options.budget) await ledger.create("root", null, options.budget);
   const outbox = new DurableOutbox({
     store,
     context,
@@ -115,6 +132,7 @@ export async function createWriterRig(directory: string, endpoint: string, polic
     types: (name) => ref(name, "std.execution"),
     bridge,
     runnerEpoch: "test-epoch",
+    ...(ledger ? { budget: { ledger, scope: () => "root" } } : {}),
   });
   const runtime = new ExecutionService({
     store,
@@ -128,7 +146,21 @@ export async function createWriterRig(directory: string, endpoint: string, polic
       if (!found) throw new Error("Missing pinned assembly");
       return found;
     },
-    reducer: () => module.parent,
+    reducer: () =>
+      options.maxUnits === undefined
+        ? module.parent
+        : {
+            initialize: module.parent.initialize,
+            reduce(state, event, config) {
+              const result = module.parent.reduce(state, event, config);
+              return {
+                state: result.state,
+                commands: result.commands.map((command) =>
+                  command.kind === "effect" ? { ...command, maxUnits: options.maxUnits! } : command,
+                ),
+              };
+            },
+          },
     outbox,
   });
   return {
@@ -141,6 +173,7 @@ export async function createWriterRig(directory: string, endpoint: string, polic
     assemblies,
     assembly,
     linker,
+    ledger,
     async close() {
       store.close();
       await generation.close();

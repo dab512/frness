@@ -2,11 +2,15 @@ import { fork } from "node:child_process";
 import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 
-export async function startRemote(path: string) {
-  const child = fork(fileURLToPath(new URL("./remote-server.mjs", import.meta.url)), [path], {
-    stdio: ["ignore", "ignore", "pipe", "ipc"],
-    execArgv: [],
-  });
+export async function startRemote(path: string, options: { readonly actualUnits?: number } = {}) {
+  const child = fork(
+    fileURLToPath(new URL("./remote-server.mjs", import.meta.url)),
+    [path, String(options.actualUnits ?? 0)],
+    {
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
+      execArgv: [],
+    },
+  );
   const ready = await Promise.race([
     once(child, "message"),
     once(child, "exit").then(() => {

@@ -88,6 +88,8 @@ export const executionSchemas: Readonly<Record<string, JsonSchema>> = {
     steps: { type: "integer", minimum: 0 },
     pendingCommands: { ...list(string), uniqueItems: true },
     issuedCommands: { ...list(string), uniqueItems: true },
+    parentInvocation: { anyOf: [objectRef, { type: "null" }] },
+    depth: { type: "integer", minimum: 0 },
   }),
   InputReceived: object({ invocation: objectRef, operation: operationRef, input: json }),
   ChildCompleted: object({ commandId: string, output: json }),

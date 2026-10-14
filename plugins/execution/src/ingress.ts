@@ -3,6 +3,7 @@ import { canonicalJson, freezeJson } from "../../../packages/abi/src/json.js";
 import { definitionKey } from "../../../packages/abi/src/references.js";
 import type {
   Assembly,
+  CommitBatch,
   ComponentInstance,
   ContractDefinition,
   DefinitionRef,
@@ -51,6 +52,8 @@ interface InvocationState {
   steps: number;
   pendingCommands: string[];
   issuedCommands: string[];
+  parentInvocation: ObjectRef | null;
+  depth: number;
 }
 interface Inbox {
   invocation: ObjectRef;
@@ -160,7 +163,10 @@ export class ExecutionService {
       },
     };
   }
-  async submit(input: InvocationRequest): Promise<InvocationReceipt> {
+  async submit(
+    input: InvocationRequest,
+    lineage?: { readonly parent: ObjectRef; readonly depth: number },
+  ): Promise<InvocationReceipt> {
     this.#options.registry.validate(this.#options.types("Request"), input);
     const request = freezeJson(structuredClone(input));
     const resolved = this.#resolve(request);
@@ -216,6 +222,8 @@ export class ExecutionService {
           steps: 0,
           pendingCommands: [],
           issuedCommands: [],
+          parentInvocation: lineage?.parent ?? null,
+          depth: lineage?.depth ?? 0,
         }),
       },
       {
@@ -307,6 +315,10 @@ export class ExecutionService {
         "Pinned implementation or configuration changed",
       );
     let result: ReturnType<typeof transition>;
+    let effects: { writes: RecordWrite[]; readSet: CommitBatch["readSet"] } = {
+      writes: [],
+      readSet: [],
+    };
     try {
       this.#options.registry.validate(inbox.event.type, inbox.event.value);
       result = transition(
@@ -331,6 +343,13 @@ export class ExecutionService {
         if ("commandId" in command && state.issuedCommands.includes(command.commandId))
           throw executionError("INVALID_COMMAND_BATCH", "Command identity was already issued");
       }
+      effects = (await this.#options.outbox?.prepare(
+        resolved.assembly,
+        request,
+        invocation,
+        result.commands,
+        { eventId: inbox.event.eventId, depth: state.depth },
+      )) ?? { writes: [], readSet: [] };
     } catch (error) {
       const code =
         error instanceof Error && "code" in error && typeof error.code === "string"
@@ -386,13 +405,8 @@ export class ExecutionService {
     const pending = result.commands.flatMap((command) =>
       "commandId" in command ? [command.commandId] : [],
     );
-    const effects = (await this.#options.outbox?.prepare(
-      resolved.assembly,
-      request,
-      invocation,
-      result.commands,
-    )) ?? { writes: [], readSet: [] };
-    if (effects.writes.length) await this.#options.cut?.("before_prepare_commit");
+    const hasEffects = result.commands.some((command) => command.kind === "effect");
+    if (hasEffects) await this.#options.cut?.("before_prepare_commit");
     await this.#options.store.commit(this.#options.context, {
       commitKey: `step/${inbox.event.eventId}`,
       readSet: [
@@ -433,7 +447,7 @@ export class ExecutionService {
         ...effects.writes,
       ],
     });
-    if (effects.writes.length) await this.#options.cut?.("after_prepare_commit");
+    if (hasEffects) await this.#options.cut?.("after_prepare_commit");
     else await this.#options.cut?.("after_reduce_commit");
   }
   async startChild(
@@ -452,7 +466,10 @@ export class ExecutionService {
     const state = (await this.#read(this.#associated("State", parent)))
       .value as unknown as InvocationState;
     const request = (await this.#read(state.request)).value as unknown as InvocationRequest;
-    const receipt = await this.submit(this.#childRequest(request, command, parent));
+    const receipt = await this.submit(this.#childRequest(request, command, parent), {
+      parent,
+      depth: state.depth + 1,
+    });
     const link: ChildLink = { parent, commandId, child: receipt.invocation, delivered: false };
     const linkRef = this.#associated("ChildLink", parent, commandId);
     if (!(await this.#maybeRead(linkRef)))

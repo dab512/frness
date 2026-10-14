@@ -1,10 +1,11 @@
-async function request(path, effect) {
+async function request(path, effect, attemptId) {
   const response = await fetch(`${effect.adapterConfiguration.endpoint}/${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       remoteKey: effect.remoteKey,
       nativeKey: effect.policy.strategy === "idempotency-key",
+      attemptId,
       ...effect.input,
     }),
   });
@@ -12,8 +13,8 @@ async function request(path, effect) {
   return response.json();
 }
 export const writer = {
-  execute: ({ effect }) => request("execute", effect),
-  reconcile: ({ effect }) => request("reconcile", effect),
+  execute: ({ effect, attemptId }) => request("execute", effect, attemptId),
+  reconcile: ({ effect, attemptId }) => request("reconcile", effect, attemptId),
 };
 export const parent = {
   initialize: () => ({}),

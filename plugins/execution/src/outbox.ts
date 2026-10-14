@@ -20,6 +20,7 @@ import type {
   ReservationRecord,
   TypeRef,
 } from "../../../specs/fractal-harness/contracts.js";
+import type { BudgetLedger, ReservationPlan } from "./budget.js";
 import type { EffectBridge } from "./effect-adapter.js";
 import type { ExecutionService } from "./ingress.js";
 import { executionError } from "./reducer.js";
@@ -40,6 +41,10 @@ export interface OutboxOptions {
   readonly types: (name: string) => TypeRef;
   readonly bridge: EffectBridge;
   readonly runnerEpoch: string;
+  readonly budget?: {
+    readonly ledger: BudgetLedger;
+    readonly scope: (invocation: ObjectRef) => string;
+  };
   readonly cut?: (point: CrashCut) => Promise<void>;
 }
 interface OutboxIntent {
@@ -105,7 +110,7 @@ export class DurableOutbox {
     invocation: ObjectRef,
     command: Extract<ReducerCommand, { kind: "effect" }>,
   ): EffectDefinition {
-    if (command.maxUnits !== 0)
+    if (command.maxUnits !== 0 && !this.options.budget)
       throw executionError("CAPABILITY_DENIED", "Positive reservations require a budget ledger");
     return this.bridge.prepare({
       assembly,
@@ -121,18 +126,24 @@ export class DurableOutbox {
     request: InvocationRequest,
     invocation: ObjectRef,
     commands: readonly ReducerCommand[],
+    step?: { readonly eventId: string; readonly depth: number },
   ): Promise<{ writes: RecordWrite[]; readSet: CommitBatch["readSet"] }> {
     const effects = commands.filter(
       (command): command is Extract<ReducerCommand, { kind: "effect" }> =>
         command.kind === "effect",
     );
-    if (!effects.length) return { writes: [], readSet: [] };
+    const budget = this.options.budget;
+    if (!effects.length)
+      return budget && step
+        ? budget.ledger.plan([], { ...step, budgetId: budget.scope(invocation) })
+        : { writes: [], readSet: [] };
     const indexRef = this.#ref("OutboxIndex", "index");
     const index = await this.#maybe(indexRef);
     const objects = index ? (index.value as unknown as { objects: ObjectRef[] }).objects : [];
     const writes: RecordWrite[] = [];
+    const requests: ReservationPlan[] = [];
     for (const command of effects) {
-      if (command.maxUnits !== 0)
+      if (command.maxUnits !== 0 && !budget)
         throw executionError("CAPABILITY_DENIED", "Positive reservations require a budget ledger");
       const effect = this.validate(assembly, request, invocation, command);
       const attemptId = `${effect.effectId}/attempt/1`;
@@ -159,7 +170,7 @@ export class DurableOutbox {
         attemptId,
         ancestorBudgetIds: [],
         unit: "model-call",
-        maxUnits: 0,
+        maxUnits: command.maxUnits,
         actualUnits: null,
         status: "reserved",
       };
@@ -170,13 +181,31 @@ export class DurableOutbox {
         { kind: "create", object: outboxRef, value: json(intent) },
       );
       objects.push(outboxRef);
+      if (budget)
+        requests.push({
+          budgetId: budget.scope(invocation),
+          reservation,
+          reservationRef: intent.reservation,
+          attemptRef: intent.attempt,
+        });
     }
     writes.push(
       index
         ? this.#replace(index, { objects })
         : { kind: "create", object: indexRef, value: json({ objects }) },
     );
-    return { writes, readSet: [] };
+    if (!budget) return { writes, readSet: [] };
+    const plan = await budget.ledger.plan(
+      requests,
+      step ? { ...step, budgetId: budget.scope(invocation) } : undefined,
+    );
+    for (const [index, reservation] of plan.reservations.entries()) {
+      const ref = requests[index]!.reservationRef;
+      const write = writes.find((write) => write.object.objectId === ref.objectId);
+      if (write && write.kind === "create")
+        writes[writes.indexOf(write)] = { ...write, value: json(reservation) };
+    }
+    return { writes: [...writes, ...plan.writes], readSet: plan.readSet };
   }
   async dispatch(ref: ObjectRef): Promise<void> {
     const outboxRecord = await this.#read(ref);
@@ -191,11 +220,14 @@ export class DurableOutbox {
     const reservationRecord = await this.#read(intent.reservation);
     const effectRecord = await this.#read(intent.effect);
     const effect = effectRecord.value as unknown as EffectDefinition;
+    const budgetGuards =
+      (await this.options.budget?.ledger.dispatchGuard(intent.reservation)) ?? [];
     await this.options.store.commit(this.options.context, {
       commitKey: `dispatch/${attempt.attemptId}`,
       readSet: [
         { object: effectRecord.object, revision: effectRecord.revision },
         { object: reservationRecord.object, revision: reservationRecord.revision },
+        ...budgetGuards,
       ],
       events: [],
       writes: [
@@ -241,6 +273,40 @@ export class DurableOutbox {
       throw executionError("INVALID_INPUT", "Attempt has not been dispatched");
     const invocationRecord = await this.#read(intent.invocation);
     const snapshot = invocationRecord.value as unknown as InvocationSnapshot;
+    const settlement = this.options.budget
+      ? await this.options.budget.ledger.settlement(
+          intent.reservation,
+          outcome.kind === "unknown"
+            ? outcome.reason === "INVALID_USAGE"
+              ? Number.NaN
+              : null
+            : outcome.actualUnits,
+          json(outcome),
+        )
+      : undefined;
+    if (settlement?.invalid) {
+      await this.options.store.commit(this.options.context, {
+        commitKey: `invalid-usage/${attempt.attemptId}`,
+        readSet: settlement.readSet,
+        events: [],
+        writes: [
+          ...settlement.writes,
+          this.#replace(attemptRecord, { ...attempt, state: "unknown" }),
+          this.#replace(outboxRecord, { ...intent, status: "unknown" }),
+          this.#replace(invocationRecord, {
+            ...snapshot,
+            ...(!terminal(snapshot) ? { phase: "waiting", waitingReason: "indeterminate" } : {}),
+            error: {
+              code: "INVALID_USAGE",
+              message: "Adapter usage violated its declared bound",
+              details: null,
+              retryable: false,
+            },
+          }),
+        ],
+      });
+      throw executionError("INVALID_USAGE", "Usage receipt blocked further dispatch");
+    }
     if (outcome.kind === "unknown") {
       if (attempt.state === "unknown" && intent.status === "unknown") return;
       await this.options.store.commit(this.options.context, {
@@ -302,12 +368,16 @@ export class DurableOutbox {
         result,
       }),
       this.#replace(outboxRecord, { ...intent, status: "resolved" }),
-      this.#replace(
-        reservationRecord,
-        outcome.actualUnits === null
-          ? reservation
-          : { ...reservation, actualUnits: outcome.actualUnits, status: "settled" },
-      ),
+      ...(settlement
+        ? settlement.writes
+        : [
+            this.#replace(
+              reservationRecord,
+              outcome.actualUnits === null
+                ? reservation
+                : { ...reservation, actualUnits: outcome.actualUnits, status: "settled" },
+            ),
+          ]),
       this.#replace(invocationRecord, {
         ...snapshot,
         unresolvedEffectIds: unresolved.ids,
@@ -341,7 +411,7 @@ export class DurableOutbox {
     }
     await this.options.store.commit(this.options.context, {
       commitKey: `receipt/${attempt.attemptId}`,
-      readSet: unresolved.readSet,
+      readSet: [...unresolved.readSet, ...(settlement?.readSet ?? [])],
       events: existingResolution ? [] : [event],
       writes,
     });
@@ -403,7 +473,7 @@ export class DurableOutbox {
     readSet.push({ object: invocationRecord.object, revision: invocationRecord.revision });
     const sourceReservation = (await this.#read(original.reservation))
       .value as unknown as ReservationRecord;
-    if (sourceReservation.maxUnits !== 0)
+    if (sourceReservation.maxUnits !== 0 && !this.options.budget)
       throw executionError("CAPABILITY_DENIED", "Retry reservation requires a budget ledger");
     const attemptId = `${effect.effectId}/attempt/${attempts.length + 1}`;
     const reservationId = `${attemptId}/reservation`;
@@ -433,15 +503,32 @@ export class DurableOutbox {
       reservation: this.#ref("Reservation", reservationId),
       status: "prepared",
     };
+    const budgetPlan = this.options.budget
+      ? await this.options.budget.ledger.plan([
+          {
+            budgetId:
+              sourceReservation.ancestorBudgetIds[0] ??
+              this.options.budget.scope(original.invocation),
+            reservation,
+            reservationRef: intent.reservation,
+            attemptRef: intent.attempt,
+          },
+        ])
+      : undefined;
     await this.options.store.commit(this.options.context, {
       commitKey: `retry/${attemptId}`,
-      readSet,
+      readSet: [...readSet, ...(budgetPlan?.readSet ?? [])],
       events: [],
       writes: [
         { kind: "create", object: intent.attempt, value: json(attempt) },
-        { kind: "create", object: intent.reservation, value: json(reservation) },
+        {
+          kind: "create",
+          object: intent.reservation,
+          value: json(budgetPlan?.reservations[0] ?? reservation),
+        },
         { kind: "create", object: retryRef, value: json(intent) },
         this.#replace(index, { objects: [...objects, retryRef] }),
+        ...(budgetPlan?.writes ?? []),
       ],
     });
     return retryRef;
