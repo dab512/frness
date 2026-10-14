@@ -16,7 +16,20 @@ export function assertJson(value: unknown, maxDepth = 64): void {
     }
     ancestors.add(current);
     if (Array.isArray(current)) {
-      for (let index = 0; index < current.length; index++) visit(current[index], depth + 1);
+      const descriptors = Object.getOwnPropertyDescriptors(current);
+      for (const key of Reflect.ownKeys(current)) {
+        if (key === "length") continue;
+        if (typeof key !== "string" || !/^(0|[1-9]\d*)$/.test(key) || Number(key) >= current.length)
+          throw Object.assign(new Error("Non-JSON array properties"), { code: "NON_JSON_VALUE" });
+      }
+      for (let index = 0; index < current.length; index++) {
+        const descriptor = descriptors[String(index)];
+        if (!descriptor || !Object.hasOwn(descriptor, "value"))
+          throw Object.assign(new Error("JSON array accessors and holes forbidden"), {
+            code: "NON_JSON_VALUE",
+          });
+        visit(descriptor.value, depth + 1);
+      }
     } else {
       if (Reflect.ownKeys(current).length !== Object.keys(current).length)
         throw Object.assign(new Error("Non-JSON keys"), { code: "NON_JSON_VALUE" });
