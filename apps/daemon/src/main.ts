@@ -31,6 +31,16 @@ export interface DaemonProfile {
   readonly credentials: Readonly<
     Record<string, { readonly environment: string; readonly instances: readonly string[] }>
   >;
+  readonly filesystems?: Readonly<
+    Record<
+      string,
+      {
+        readonly root: string;
+        readonly access: "read" | "read-write";
+        readonly instances: readonly string[];
+      }
+    >
+  >;
 }
 export async function startDaemon(
   profile: DaemonProfile,
@@ -71,6 +81,15 @@ export async function startDaemon(
       if (name === "profile.application") return application;
       if (name === "local.subject") return { principalId: profile.principalId, grants };
       if (name === "network") return fetch;
+      if (name === "filesystem.root")
+        return (binding: string) => {
+          const source = profile.filesystems?.[binding];
+          if (!source?.instances.includes(id) || !["read", "read-write"].includes(source.access))
+            throw Object.assign(new Error("Filesystem binding unavailable"), {
+              code: "CAPABILITY_DENIED",
+            });
+          return { root: source.root, access: source.access };
+        };
       if (name === "credential")
         return (binding: string) => {
           const source = profile.credentials[binding];
@@ -111,13 +130,7 @@ export async function startDaemon(
               capability: (name) => capability(instanceId, name),
             })
           : value;
-      if (
-        definition.abi === "effect-adapter.v1" &&
-        (!bound ||
-          typeof (bound as { execute?: unknown }).execute !== "function" ||
-          typeof (bound as { reconcile?: unknown }).reconcile !== "function")
-      )
-        throw Object.assign(new Error("Bound export has invalid ABI"), { code: "INVALID_OUTPUT" });
+      generation.validateExport(definition.abi, bound);
       boundExports.set(key, bound);
       return bound;
     };

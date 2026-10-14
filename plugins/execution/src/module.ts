@@ -79,7 +79,7 @@ export const factory: NativeFactory = {
           });
         return assembly;
       },
-      reducer: (ref) => context.exported(ref) as ReducerModule,
+      reducer: (ref, instanceId) => context.exported(ref, instanceId) as ReducerModule,
       outbox,
     });
     const backend = createExecutionBackend({

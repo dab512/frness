@@ -40,7 +40,7 @@ export interface ExecutionOptions {
   readonly registry: RegistryCapability;
   readonly types: (name: string) => TypeRef;
   readonly assembly: (revision: string) => Assembly;
-  readonly reducer: (implementation: DefinitionRef) => ReducerModule;
+  readonly reducer: (implementation: DefinitionRef, instanceId: string) => ReducerModule;
   readonly outbox?: DurableOutbox;
   readonly cut?: (point: CrashCut) => Promise<void>;
 }
@@ -197,7 +197,7 @@ export class ExecutionService {
     if (parentGuard && !parentGuard.allowed)
       throw executionError("CAPABILITY_DENIED", "Ancestor control prevents a new child invocation");
     const state = initialize(
-      this.#options.reducer(resolved.instance.implementation),
+      this.#options.reducer(resolved.instance.implementation, resolved.instance.instanceId),
       request.input,
       resolved.instance.configuration,
       resolved.validation,
@@ -410,7 +410,7 @@ export class ExecutionService {
     try {
       this.#options.registry.validate(inbox.event.type, inbox.event.value);
       result = transition(
-        this.#options.reducer(state.implementation),
+        this.#options.reducer(state.implementation, request.targetInstanceId),
         state.state,
         inbox.event,
         state.configuration,
@@ -584,7 +584,7 @@ export class ExecutionService {
         canonicalJson(pinned.instance.configuration) !== canonicalJson(state.configuration)
       )
         throw new Error("Pinned configuration changed");
-      const module = this.#options.reducer(state.implementation);
+      const module = this.#options.reducer(state.implementation, request.targetInstanceId);
       if (typeof module.initialize !== "function" || typeof module.reduce !== "function")
         throw new Error("Pinned module is not available");
     } catch (error) {
