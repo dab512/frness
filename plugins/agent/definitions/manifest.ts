@@ -128,7 +128,7 @@ export function agentManifest(
   return {
     format: 1,
     packageId: "std.agent",
-    version: "1.0.0",
+    version: "1.0.1",
     hostAbi: "fractal.host.v1",
     dependencies: [meta("Type"), lookup("std.tools", "Invoke"), lookup("std.llm", "Generate")],
     reload: { snapshotType: meta("NullSnapshot"), serverEntry: "reload", clientEntry: null },

@@ -29,7 +29,7 @@ export function modelEffectAdapter(options: ModelProviderOptions): EffectAdapter
         if (
           error instanceof Error &&
           "code" in error &&
-          ["MODEL_CONFIGURATION_MISSING", "INVALID_INPUT"].includes(String(error.code))
+          ["DEPENDENCY_UNAVAILABLE", "INVALID_INPUT"].includes(String(error.code))
         ) {
           return {
             kind: "failed_known",

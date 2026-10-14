@@ -31,7 +31,7 @@ export interface ModelProviderOptions {
 function configuration(value: unknown): ModelConfiguration {
   try {
     assertJson(value);
-    validateModelShape("ProviderConfiguration", value, "MODEL_CONFIGURATION_MISSING");
+    validateModelShape("ProviderConfiguration", value, "DEPENDENCY_UNAVAILABLE");
     const config = value as unknown as ModelConfiguration;
     const endpoint = new URL(config.endpoint);
     if (
@@ -45,7 +45,7 @@ function configuration(value: unknown): ModelConfiguration {
       throw new Error();
     return freezeJson(structuredClone(config));
   } catch {
-    throw modelError("MODEL_CONFIGURATION_MISSING");
+    throw modelError("DEPENDENCY_UNAVAILABLE");
   }
 }
 
@@ -66,7 +66,7 @@ export function createModelProvider(options: ModelProviderOptions) {
         credential = options.credential(config.credentialBinding);
         if (!credential || /[\r\n]/.test(credential)) throw new Error();
       } catch {
-        throw modelError("MODEL_CONFIGURATION_MISSING");
+        throw modelError("DEPENDENCY_UNAVAILABLE");
       }
       const stream = new ModelStream(
         request,
@@ -86,7 +86,7 @@ export function createModelProvider(options: ModelProviderOptions) {
         if (
           error instanceof Error &&
           "code" in error &&
-          ["INVALID_INPUT", "MODEL_CONFIGURATION_MISSING"].includes(String(error.code))
+          ["INVALID_INPUT", "DEPENDENCY_UNAVAILABLE"].includes(String(error.code))
         )
           throw modelError("INCOMPLETE_RESPONSE");
         throw error;

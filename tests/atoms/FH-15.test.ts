@@ -290,10 +290,7 @@ test("AT-015 single-call daemon uses scoped credentials and one actual HTTP requ
       },
       accepted.invocation,
     );
-    assert.equal(
-      (raw.value as { error: { code: string } }).error.code,
-      "MODEL_CONFIGURATION_MISSING",
-    );
+    assert.equal((raw.value as { error: { code: string } }).error.code, "DEPENDENCY_UNAVAILABLE");
     assert.deepEqual(record.value.unresolvedEffectIds, []);
     assert.equal(calls, 2, "wrong instance cannot resolve or use another instance's credential");
   } finally {
@@ -341,10 +338,30 @@ test("AT-015 missing configuration or credential produces zero provider calls", 
     },
   ]) {
     await assert.rejects(provider.generate(request, configuration), {
-      code: "MODEL_CONFIGURATION_MISSING",
+      code: "DEPENDENCY_UNAVAILABLE",
     });
   }
   assert.equal(calls, 0);
+  const charged = createModelProvider({
+    validate,
+    credential: () => "test",
+    transport: async function* () {
+      calls++;
+      throw Object.assign(new Error("Remote dependency failed after request"), {
+        code: "DEPENDENCY_UNAVAILABLE",
+      });
+    },
+  });
+  await assert.rejects(
+    charged.generate(request, {
+      endpoint: "http://localhost/model",
+      model: "test",
+      credentialBinding: "test",
+      decoder: "frness.model.ndjson.v1",
+    }),
+    { code: "INCOMPLETE_RESPONSE" },
+  );
+  assert.equal(calls, 1);
 });
 
 test("AT-015 partial or complete tool JSON without final never becomes executable output", async () => {

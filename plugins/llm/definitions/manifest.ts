@@ -57,7 +57,7 @@ export function llmManifest(meta: (name: string) => DefinitionRef): PackageManif
   return {
     format: 1,
     packageId: "std.llm",
-    version: "1.0.0",
+    version: "1.0.1",
     hostAbi: "fractal.host.v1",
     dependencies: [meta("Type")],
     reload: { snapshotType: meta("NullSnapshot"), serverEntry: "reload", clientEntry: null },
@@ -81,7 +81,7 @@ export function llmManifest(meta: (name: string) => DefinitionRef): PackageManif
             generate: {
               input: local("ModelRequest"),
               output: local("ModelCompletion"),
-              errorCodes: ["MODEL_CONFIGURATION_MISSING", "INCOMPLETE_RESPONSE", "INVALID_OUTPUT"],
+              errorCodes: ["DEPENDENCY_UNAVAILABLE", "INCOMPLETE_RESPONSE", "INVALID_OUTPUT"],
             },
           },
           allowedEffects: [local("Generate")],
