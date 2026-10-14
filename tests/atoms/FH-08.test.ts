@@ -136,7 +136,7 @@ test("AT-008 connected effect boundary records remote side effects and classifie
   assert.equal((await bridge.execute(lost, "lost-attempt", "epoch")).kind, "unknown");
   assert.deepEqual(await remote.counts(), { calls: 2, changes: 2 });
   assert.equal((await bridge.reconcile(lost, "lost-attempt")).kind, "unknown");
-  assert.deepEqual(await remote.counts(), { calls: 2, changes: 2 });
+  assert.deepEqual(await remote.counts(), { calls: 3, changes: 2 });
   const throwing = new EffectBridge({
     ...bridge.options,
     adapter: () => ({
@@ -164,8 +164,8 @@ test("AT-008 connected effect boundary records remote side effects and classifie
     }),
   });
   assert.equal((await invalid.execute(effect, "invalid", "epoch")).kind, "unknown");
-  assert.deepEqual(await remote.counts(), { calls: 2, changes: 2 });
+  assert.deepEqual(await remote.counts(), { calls: 3, changes: 2 });
   await remote.close();
   remote = await startRemote(join(directory, "remote.sqlite"));
-  assert.deepEqual(await remote.counts(), { calls: 2, changes: 2 });
+  assert.deepEqual(await remote.counts(), { calls: 3, changes: 2 });
 });

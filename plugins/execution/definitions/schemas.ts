@@ -63,7 +63,12 @@ export const executionSchemas: Readonly<Record<string, JsonSchema>> = {
     assemblyRevision: string,
     operation: operationRef,
     input: json,
-    idempotencyKey: string,
+    idempotencyKey: {
+      type: "string",
+      minLength: 1,
+      maxLength: 128,
+      pattern: "^[\\u0000-\\u007f]+$",
+    },
   }),
   Invocation: object({
     ref: objectRef,

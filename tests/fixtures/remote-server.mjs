@@ -29,6 +29,7 @@ const server = createServer(async (request, response) => {
     }
     const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
     if (request.url === "/reconcile") {
+      db.prepare("INSERT INTO calls DEFAULT VALUES").run();
       const row = db.prepare("SELECT value FROM changes WHERE remote_key=?").get(input.remoteKey);
       response.end(
         JSON.stringify(
@@ -49,25 +50,26 @@ const server = createServer(async (request, response) => {
       response.end();
       return;
     }
-    const value = db
+    const receipt = db
       .transaction(() => {
         db.prepare("INSERT INTO calls DEFAULT VALUES").run();
         const key = input.nativeKey ? input.remoteKey : null;
         const previous = key
           ? db.prepare("SELECT value FROM changes WHERE remote_key=?").get(key)
           : undefined;
-        if (previous) return JSON.parse(previous.value);
+        if (previous) return { value: JSON.parse(previous.value), created: false };
         const result = { externalId: randomUUID() };
         db.prepare("INSERT INTO changes(id,remote_key,value) VALUES(?,?,?)").run(
           result.externalId,
           key,
           JSON.stringify(result),
         );
-        return result;
+        return { value: result, created: true };
       })
       .immediate();
+    const value = receipt.value;
     process.send?.({ point: "remote_accepted", remoteKey: input.remoteKey });
-    if (input.mode === "lost-reply") {
+    if (input.mode === "lost-reply" && receipt.created) {
       response.destroy();
       return;
     }

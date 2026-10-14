@@ -22,6 +22,7 @@ import type {
   ReducerModule,
   TypeRef,
 } from "../../../specs/fractal-harness/contracts.js";
+import { invocationIdentity } from "./idempotency.js";
 import type { CrashCut, DurableOutbox } from "./outbox.js";
 import { executionError, initialize, type ReducerValidation, transition } from "./reducer.js";
 
@@ -163,14 +164,7 @@ export class ExecutionService {
     this.#options.registry.validate(this.#options.types("Request"), input);
     const request = freezeJson(structuredClone(input));
     const resolved = this.#resolve(request);
-    const id = hash([
-      this.#options.context.principalId,
-      this.#options.context.scopeId,
-      request.assemblyRevision,
-      request.targetInstanceId,
-      request.operation,
-      request.idempotencyKey,
-    ]);
+    const { id } = invocationIdentity(this.#options.context, request);
     const receiptRef = this.#ref("Receipt", id);
     const previous = await this.#maybeRead(receiptRef);
     if (previous) {

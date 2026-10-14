@@ -23,6 +23,7 @@ import type {
 import type { EffectBridge } from "./effect-adapter.js";
 import type { ExecutionService } from "./ingress.js";
 import { executionError } from "./reducer.js";
+import { evaluateRetry } from "./retry.js";
 
 export type CrashCut =
   | "before_prepare_commit"
@@ -278,6 +279,7 @@ export class DurableOutbox {
     const reservation = reservationRecord.value as unknown as ReservationRecord;
     const stateRecord = await this.#read(this.#associated("State", intent.invocation));
     const state = stateRecord.value as unknown as RuntimeState;
+    const unresolved = await this.#unresolved(intent.invocation, attempt.attemptId);
     const event: ReducerEvent = {
       eventId: digest([attempt.effectId, "resolved"]),
       type: this.options.types(outcome.kind === "completed" ? "EffectCompleted" : "EffectFailed"),
@@ -308,7 +310,10 @@ export class DurableOutbox {
       ),
       this.#replace(invocationRecord, {
         ...snapshot,
-        unresolvedEffectIds: snapshot.unresolvedEffectIds.filter((id) => id !== attempt.effectId),
+        unresolvedEffectIds: unresolved.ids,
+        ...(!terminal(snapshot) && unresolved.ids.length
+          ? { phase: "waiting", waitingReason: "indeterminate" }
+          : {}),
       }),
     ];
     if (!existingResolution) {
@@ -336,7 +341,7 @@ export class DurableOutbox {
     }
     await this.options.store.commit(this.options.context, {
       commitKey: `receipt/${attempt.attemptId}`,
-      readSet: [],
+      readSet: unresolved.readSet,
       events: existingResolution ? [] : [event],
       writes,
     });
@@ -353,11 +358,102 @@ export class DurableOutbox {
         });
     }
   }
+  async #unresolved(
+    invocation: ObjectRef,
+    resolvedAttemptId: string,
+  ): Promise<{ ids: string[]; readSet: CommitBatch["readSet"] }> {
+    const ids = new Set<string>();
+    const readSet: { object: ObjectRef; revision: string }[] = [];
+    for (const ref of await this.intents()) {
+      const intent = (await this.#read(ref)).value as unknown as OutboxIntent;
+      if (intent.invocation.objectId !== invocation.objectId) continue;
+      const record = await this.#read(intent.attempt);
+      const attempt = record.value as unknown as AttemptRecord;
+      readSet.push({ object: record.object, revision: record.revision });
+      if (
+        attempt.attemptId !== resolvedAttemptId &&
+        ["dispatched", "unknown"].includes(attempt.state)
+      )
+        ids.add(attempt.effectId);
+    }
+    return { ids: [...ids], readSet };
+  }
+  async retry(ref: ObjectRef, now: string): Promise<ObjectRef | undefined> {
+    const originalRecord = await this.#read(ref);
+    const original = originalRecord.value as unknown as OutboxIntent;
+    const effectRecord = await this.#read(original.effect);
+    const effect = effectRecord.value as unknown as EffectDefinition;
+    const index = await this.#read(this.#ref("OutboxIndex", "index"));
+    const objects = (index.value as unknown as { objects: ObjectRef[] }).objects;
+    const attempts: AttemptRecord[] = [];
+    const readSet: { object: ObjectRef; revision: string }[] = [
+      { object: effectRecord.object, revision: effectRecord.revision },
+    ];
+    for (const object of objects) {
+      const intent = (await this.#read(object)).value as unknown as OutboxIntent;
+      if (canonicalJson(intent.effect) !== canonicalJson(original.effect)) continue;
+      const record = await this.#read(intent.attempt);
+      attempts.push(record.value as unknown as AttemptRecord);
+      readSet.push({ object: record.object, revision: record.revision });
+    }
+    if (evaluateRetry(effect, attempts, now).kind !== "retry") return undefined;
+    const invocationRecord = await this.#read(original.invocation);
+    const snapshot = invocationRecord.value as unknown as InvocationSnapshot;
+    if (terminal(snapshot) || snapshot.control !== "running") return undefined;
+    readSet.push({ object: invocationRecord.object, revision: invocationRecord.revision });
+    const sourceReservation = (await this.#read(original.reservation))
+      .value as unknown as ReservationRecord;
+    if (sourceReservation.maxUnits !== 0)
+      throw executionError("CAPABILITY_DENIED", "Retry reservation requires a budget ledger");
+    const attemptId = `${effect.effectId}/attempt/${attempts.length + 1}`;
+    const reservationId = `${attemptId}/reservation`;
+    const retryRef = this.#associated(
+      "Outbox",
+      original.invocation,
+      `${original.commandId}/attempt/${attempts.length + 1}`,
+    );
+    const attempt: AttemptRecord = {
+      attemptId,
+      effectId: effect.effectId,
+      runnerEpoch: this.options.runnerEpoch,
+      state: "prepared",
+      reservationId,
+      result: null,
+    };
+    const reservation: ReservationRecord = {
+      ...sourceReservation,
+      attemptId,
+      reservationId,
+      actualUnits: null,
+      status: "reserved",
+    };
+    const intent = {
+      ...original,
+      attempt: this.#ref("Attempt", attemptId),
+      reservation: this.#ref("Reservation", reservationId),
+      status: "prepared",
+    };
+    await this.options.store.commit(this.options.context, {
+      commitKey: `retry/${attemptId}`,
+      readSet,
+      events: [],
+      writes: [
+        { kind: "create", object: intent.attempt, value: json(attempt) },
+        { kind: "create", object: intent.reservation, value: json(reservation) },
+        { kind: "create", object: retryRef, value: json(intent) },
+        this.#replace(index, { objects: [...objects, retryRef] }),
+      ],
+    });
+    return retryRef;
+  }
   async pump(runtime: ExecutionService): Promise<void> {
     for (const ref of await this.intents()) {
       await this.dispatch(ref);
       const intent = (await this.#read(ref)).value as unknown as OutboxIntent;
-      if (intent.status === "resolved")
+      if (
+        intent.status === "resolved" &&
+        !(await runtime.snapshot(intent.invocation)).unresolvedEffectIds.length
+      )
         await runtime.step(intent.invocation, `effect:${intent.commandId}`);
     }
   }
