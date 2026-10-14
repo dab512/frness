@@ -2,5 +2,8 @@
   "name": "@frness/meta",
   "version": "0.1.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "ajv": "8.20.0"
+  }
 }
