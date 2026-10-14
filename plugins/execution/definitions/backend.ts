@@ -9,7 +9,7 @@ export function backendManifest(
   return {
     format: 1,
     packageId: "std.execution-backend",
-    version: "1.0.2",
+    version: "1.0.3",
     hostAbi: "fractal.host.v1",
     dependencies: [
       meta("Type"),
@@ -33,7 +33,7 @@ export function backendManifest(
             type: "object",
             additionalProperties: false,
             required: ["executionType"],
-            properties: { executionType: definitionRef },
+            properties: { executionType: definitionRef, repositoryContract: definitionRef },
           },
           references: {},
         },

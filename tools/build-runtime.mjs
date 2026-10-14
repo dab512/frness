@@ -6,6 +6,7 @@ import { apiManifest } from "../plugins/api/src/manifest.ts";
 import { backendManifest } from "../plugins/execution/definitions/backend.ts";
 import { executionManifest } from "../plugins/execution/definitions/manifest.ts";
 import { storageManifest } from "../plugins/store-sqlite/src/manifest.ts";
+import { repositoryManifest } from "../plugins/store-sqlite/src/repository-manifest.ts";
 import { buildBootstrap } from "./build-bootstrap.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -50,6 +51,13 @@ export async function buildRuntime(directory, options = {}) {
       async (meta, lookup) => ({
         manifest: backendManifest(meta, lookup),
         files: { "server.mjs": await buildServerModule("plugins/execution/src/module.ts") },
+        activations: ["activate"],
+      }),
+      async (meta) => ({
+        manifest: repositoryManifest(meta),
+        files: {
+          "server.mjs": await buildServerModule("plugins/store-sqlite/src/repository-module.ts"),
+        },
         activations: ["activate"],
       }),
       ...(options.packages ?? []),

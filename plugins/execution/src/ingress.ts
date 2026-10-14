@@ -27,10 +27,17 @@ import { InvocationControl } from "./control.js";
 import { invocationIdentity } from "./idempotency.js";
 import type { CrashCut, DurableOutbox } from "./outbox.js";
 import { executionError, initialize, type ReducerValidation, transition } from "./reducer.js";
+import { type RepositoryBridge, RepositoryUnavailable } from "./repository.js";
 
 interface RegistryCapability {
   get(ref: DefinitionRef): { readonly value: Json };
   validate(type: TypeRef, value: unknown): void;
+}
+interface ResolvedInvocation {
+  assembly: Assembly;
+  instance: ComponentInstance;
+  implementation: ImplementationDefinition;
+  validation: ReducerValidation;
 }
 export interface ExecutionOptions {
   readonly store: ObjectStore;
@@ -42,6 +49,7 @@ export interface ExecutionOptions {
   readonly assembly: (revision: string) => Assembly;
   readonly reducer: (implementation: DefinitionRef, instanceId: string) => ReducerModule;
   readonly outbox?: DurableOutbox;
+  readonly repository?: RepositoryBridge;
   readonly cut?: (point: CrashCut) => Promise<void>;
 }
 interface InvocationState {
@@ -54,6 +62,7 @@ interface InvocationState {
   pendingCommands: string[];
   issuedCommands: string[];
   parentInvocation: ObjectRef | null;
+  parentCommandId: string | null;
   depth: number;
   inboxIds: string[];
   awaitingInputs: Record<string, TypeRef>;
@@ -129,12 +138,7 @@ export class ExecutionService {
       throw error;
     }
   }
-  #resolve(request: InvocationRequest): {
-    assembly: Assembly;
-    instance: ComponentInstance;
-    implementation: ImplementationDefinition;
-    validation: ReducerValidation;
-  } {
+  #resolve(request: InvocationRequest): ResolvedInvocation {
     const assembly = this.#options.assembly(request.assemblyRevision);
     if (assembly.revision !== request.assemblyRevision)
       throw executionError("PINNED_DEPENDENCY_MISSING", "Assembly revision does not match");
@@ -145,7 +149,10 @@ export class ExecutionService {
       throw executionError("CAPABILITY_DENIED", "Target is outside the scope");
     const implementation = this.#options.registry.get(instance.implementation)
       .value as unknown as ImplementationDefinition;
-    if (implementation.abi !== "reducer.v1")
+    if (
+      implementation.abi !== "reducer.v1" &&
+      !(implementation.abi === "store.v1" && this.#options.repository)
+    )
       throw executionError("UNKNOWN_ABI", "Target is not a reducer");
     if (
       !implementation.contracts.some(
@@ -179,11 +186,16 @@ export class ExecutionService {
   }
   async submit(
     input: InvocationRequest,
-    lineage?: { readonly parent: ObjectRef; readonly depth: number },
+    lineage?: { readonly parent: ObjectRef; readonly depth: number; readonly commandId?: string },
   ): Promise<InvocationReceipt> {
     this.#options.registry.validate(this.#options.types("Request"), input);
     const request = freezeJson(structuredClone(input));
     const resolved = this.#resolve(request);
+    if (resolved.implementation.abi === "store.v1" && (!lineage?.parent || !lineage.commandId))
+      throw executionError(
+        "CAPABILITY_DENIED",
+        "Repository invocations require a connected parent command",
+      );
     const { id } = invocationIdentity(this.#options.context, request);
     const receiptRef = this.#ref("Receipt", id);
     const previous = await this.#maybeRead(receiptRef);
@@ -196,12 +208,16 @@ export class ExecutionService {
     const parentGuard = lineage ? await this.controls.guard(lineage.parent) : undefined;
     if (parentGuard && !parentGuard.allowed)
       throw executionError("CAPABILITY_DENIED", "Ancestor control prevents a new child invocation");
-    const state = initialize(
-      this.#options.reducer(resolved.instance.implementation, resolved.instance.instanceId),
-      request.input,
-      resolved.instance.configuration,
-      resolved.validation,
-    );
+    const state =
+      resolved.implementation.abi === "store.v1"
+        ? null
+        : initialize(
+            this.#options.reducer(resolved.instance.implementation, resolved.instance.instanceId),
+            request.input,
+            resolved.instance.configuration,
+            resolved.validation,
+          );
+    this.#options.registry.validate(resolved.implementation.stateType, state);
     const receipt: InvocationReceipt = {
       request: this.#ref("Request", id),
       invocation: this.#ref("Invocation", id),
@@ -240,6 +256,7 @@ export class ExecutionService {
           pendingCommands: [],
           issuedCommands: [],
           parentInvocation: lineage?.parent ?? null,
+          parentCommandId: lineage?.commandId ?? null,
           depth: lineage?.depth ?? 0,
           inboxIds: ["input"],
           awaitingInputs: {},
@@ -358,9 +375,15 @@ export class ExecutionService {
       assemblyRevision: request.assemblyRevision,
       operation: { contract: slot.accepts, operation: command.operation },
       input: command.input,
-      idempotencyKey: `child/${invocation.objectId}/${command.commandId}`,
+      idempotencyKey: `child/${hash([invocation.objectId, command.commandId])}`,
     };
     this.#resolve(child);
+    if (
+      this.#options.repository &&
+      definitionKey(child.operation.contract) ===
+        definitionKey(this.#options.repository.options.contract)
+    )
+      this.#options.repository.validate(child, command.commandId);
     return child;
   }
   async step(invocation: ObjectRef, inboxId: string): Promise<void> {
@@ -409,8 +432,19 @@ export class ExecutionService {
     };
     try {
       this.#options.registry.validate(inbox.event.type, inbox.event.value);
+      const module =
+        resolved.implementation.abi === "store.v1"
+          ? await this.#repositoryStep({
+              invocation,
+              request,
+              resolved,
+              state,
+              inbox,
+              controls: controls.readSet,
+            })
+          : this.#options.reducer(state.implementation, request.targetInstanceId);
       result = transition(
-        this.#options.reducer(state.implementation, request.targetInstanceId),
+        module,
         state.state,
         inbox.event,
         state.configuration,
@@ -431,14 +465,18 @@ export class ExecutionService {
         if ("commandId" in command && state.issuedCommands.includes(command.commandId))
           throw executionError("INVALID_COMMAND_BATCH", "Command identity was already issued");
       }
-      effects = (await this.#options.outbox?.prepare(
-        resolved.assembly,
-        request,
-        invocation,
-        result.commands,
-        { eventId: inbox.event.eventId, depth: state.depth },
-      )) ?? { writes: [], readSet: [] };
+      effects =
+        resolved.implementation.abi === "store.v1"
+          ? { writes: [], readSet: [] }
+          : ((await this.#options.outbox?.prepare(
+              resolved.assembly,
+              request,
+              invocation,
+              result.commands,
+              { eventId: inbox.event.eventId, depth: state.depth },
+            )) ?? { writes: [], readSet: [] });
     } catch (error) {
+      if (error instanceof RepositoryUnavailable) throw error;
       const code =
         error instanceof Error && "code" in error && typeof error.code === "string"
           ? error.code
@@ -572,6 +610,71 @@ export class ExecutionService {
     if (hasEffects) await this.#options.cut?.("after_prepare_commit");
     else await this.#options.cut?.("after_reduce_commit");
   }
+  async #repositoryStep(input: {
+    invocation: ObjectRef;
+    request: InvocationRequest;
+    resolved: ResolvedInvocation;
+    state: InvocationState;
+    inbox: Inbox;
+    controls: CommitBatch["readSet"];
+  }): Promise<ReducerModule> {
+    const { invocation, request, resolved, state, inbox, controls } = input;
+    if (!state.parentInvocation || !state.parentCommandId)
+      throw executionError("CAPABILITY_DENIED", "Repository parent command is missing");
+    let parentState = (await this.#read(this.#associated("State", state.parentInvocation)))
+      .value as unknown as InvocationState;
+    let parentRequest = (await this.#read(parentState.request))
+      .value as unknown as InvocationRequest;
+    const seen = new Set<string>();
+    while (
+      definitionKey(parentRequest.operation.contract) ===
+        definitionKey(this.#options.repository!.options.contract) &&
+      parentState.parentInvocation
+    ) {
+      const key = canonicalJson(parentState.parentInvocation);
+      if (seen.has(key))
+        throw executionError("CAPABILITY_DENIED", "Repository authority lineage contains a cycle");
+      seen.add(key);
+      parentState = (await this.#read(this.#associated("State", parentState.parentInvocation)))
+        .value as unknown as InvocationState;
+      parentRequest = (await this.#read(parentState.request)).value as unknown as InvocationRequest;
+    }
+    const parent = this.#resolve(parentRequest).instance;
+    const dispatch = this.#ref("RepositoryDispatch", inbox.event.eventId);
+    if (!(await this.#maybeRead(dispatch))) {
+      const step = await this.#options.outbox?.prepare(resolved.assembly, request, invocation, [], {
+        eventId: inbox.event.eventId,
+        depth: state.depth,
+      });
+      try {
+        await this.#options.store.commit(this.#options.context, {
+          commitKey: `repository-dispatch/${inbox.event.eventId}`,
+          events: [],
+          readSet: [...controls, ...(step?.readSet ?? [])],
+          writes: [
+            ...(step?.writes ?? []),
+            {
+              kind: "create",
+              object: dispatch,
+              value: json({ invocation, eventId: inbox.event.eventId }),
+            },
+          ],
+        });
+      } catch {
+        throw new RepositoryUnavailable();
+      }
+    }
+    const command = await this.#options.repository!.execute({
+      request,
+      child: resolved.instance,
+      parent,
+      principal: this.#options.context,
+      parentInvocation: state.parentInvocation,
+      commandId: state.parentCommandId,
+      outputType: resolved.validation.outputType,
+    });
+    return { initialize: () => null, reduce: (state) => ({ state, commands: [command] }) };
+  }
   async resume(invocation: ObjectRef, key: string): Promise<InvocationSnapshot> {
     this.#assertInvocation(invocation);
     const state = (await this.#read(this.#associated("State", invocation)))
@@ -584,9 +687,13 @@ export class ExecutionService {
         canonicalJson(pinned.instance.configuration) !== canonicalJson(state.configuration)
       )
         throw new Error("Pinned configuration changed");
-      const module = this.#options.reducer(state.implementation, request.targetInstanceId);
-      if (typeof module.initialize !== "function" || typeof module.reduce !== "function")
-        throw new Error("Pinned module is not available");
+      if (pinned.implementation.abi === "store.v1")
+        this.#options.repository!.options.store(pinned.instance);
+      else {
+        const module = this.#options.reducer(state.implementation, request.targetInstanceId);
+        if (typeof module.initialize !== "function" || typeof module.reduce !== "function")
+          throw new Error("Pinned module is not available");
+      }
     } catch (error) {
       if (error instanceof Error && "code" in error && error.code === "CAPABILITY_DENIED")
         throw error;
@@ -700,6 +807,7 @@ export class ExecutionService {
     const receipt = await this.submit(this.#childRequest(request, command, parent), {
       parent,
       depth: state.depth + 1,
+      commandId,
     });
     const link: ChildLink = { parent, commandId, child: receipt.invocation, delivered: false };
     const linkRef = this.#associated("ChildLink", parent, commandId);

@@ -31,6 +31,9 @@ export interface DaemonProfile {
   readonly credentials: Readonly<
     Record<string, { readonly environment: string; readonly instances: readonly string[] }>
   >;
+  readonly repositories?: Readonly<
+    Record<string, { readonly serviceId: string; readonly instances: readonly string[] }>
+  >;
   readonly filesystems?: Readonly<
     Record<
       string,
@@ -69,6 +72,16 @@ export async function startDaemon(
           profile.application,
         )
       : undefined;
+    const allInstances = [...services.instances, ...(application?.instances ?? [])];
+    if (
+      new Set(allInstances.map((instance) => instance.instanceId)).size !== allInstances.length ||
+      new Set(allInstances.map((instance) => instance.stateNamespaceId)).size !==
+        allInstances.length
+    )
+      throw Object.assign(
+        new Error("Service and application instance identities and namespaces must be unique"),
+        { code: "DEFINITION_CONFLICT" },
+      );
     await mkdir(profile.dataDirectory, { recursive: true });
     const instances = new Map<string, NativeService>();
     const implementation = (ref: DefinitionRef) =>
@@ -79,7 +92,22 @@ export async function startDaemon(
       if (name === "native.sqlite") return Database;
       if (name === "data.directory") return resolve(profile.dataDirectory);
       if (name === "profile.application") return application;
-      if (name === "local.subject") return { principalId: profile.principalId, grants };
+      if (name === "local.subject")
+        return { principalId: profile.principalId, grants, instanceGrants: profile.grants };
+      if (name === "repository")
+        return (binding: string) => {
+          const source = profile.repositories?.[binding];
+          const store = source?.instances.includes(id)
+            ? (instances.get(source.serviceId)?.value as
+                | { read?: unknown; commit?: unknown }
+                | undefined)
+            : undefined;
+          if (!store || typeof store.read !== "function" || typeof store.commit !== "function")
+            throw Object.assign(new Error("Repository binding unavailable"), {
+              code: "CAPABILITY_DENIED",
+            });
+          return store;
+        };
       if (name === "network") return fetch;
       if (name === "filesystem.root")
         return (binding: string) => {

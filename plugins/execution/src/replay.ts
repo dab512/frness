@@ -34,6 +34,7 @@ export interface ReplayOptions {
     validate(type: TypeRef, value: unknown): void;
   };
   readonly reducer: (implementation: DefinitionRef) => ReducerModule;
+  readonly repositoryExport?: (implementation: DefinitionRef) => ObjectStore;
   readonly createScratch: (
     path: string,
     type: TypeRef,
@@ -112,7 +113,20 @@ export class ReplayService {
       throw executionError("PINNED_DEPENDENCY_MISSING", "Pinned operation is not available");
     this.options.registry.validate(operation.input, request.input);
     this.options.registry.validate(implementation.configurationType, recorded.configuration);
-    const module = this.options.reducer(recorded.implementation);
+    let repositoryCommands: readonly ReducerCommand[] = [];
+    let module: ReducerModule;
+    if (implementation.abi === "store.v1") {
+      const exported = this.options.repositoryExport?.(recorded.implementation);
+      if (!exported || typeof exported.read !== "function" || typeof exported.commit !== "function")
+        throw executionError(
+          "PINNED_DEPENDENCY_MISSING",
+          "Pinned repository export is unavailable for replay",
+        );
+      module = {
+        initialize: () => null,
+        reduce: (state) => ({ state, commands: repositoryCommands }),
+      };
+    } else module = this.options.reducer(recorded.implementation);
     const validation = {
       validate: (type: TypeRef, value: unknown) => this.options.registry.validate(type, value),
       stateType: implementation.stateType,
@@ -165,16 +179,24 @@ export class ReplayService {
         };
         if (canonicalJson(inbox.invocation) !== canonicalJson(invocation)) throw divergence();
         this.options.registry.validate(inbox.event.type, inbox.event.value);
+        const commands = (await read(trace.commands)).value as unknown as {
+          eventId: string;
+          commands: ReducerCommand[];
+        };
+        if (implementation.abi === "store.v1") {
+          if (
+            commands.commands.length !== 1 ||
+            !["complete", "fail"].includes(commands.commands[0]!.kind)
+          )
+            throw divergence();
+          repositoryCommands = commands.commands;
+        }
         let next: ReturnType<typeof transition>;
         try {
           next = transition(module, state, inbox.event, recorded.configuration, validation);
         } catch {
           throw divergence();
         }
-        const commands = (await read(trace.commands)).value as unknown as {
-          eventId: string;
-          commands: ReducerCommand[];
-        };
         if (
           commands.eventId !== inbox.event.eventId ||
           digest(next.commands) !== trace.commandDigest ||

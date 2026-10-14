@@ -17,6 +17,7 @@ import { createExecutionBackend } from "./backend.js";
 import { EffectBridge } from "./effect-adapter.js";
 import { ExecutionService } from "./ingress.js";
 import { DurableOutbox } from "./outbox.js";
+import { RepositoryBridge } from "./repository.js";
 
 let snapshotType: DefinitionRef;
 export function activate(host: BootstrapRegistrationHost): () => void {
@@ -25,11 +26,15 @@ export function activate(host: BootstrapRegistrationHost): () => void {
 }
 export const factory: NativeFactory = {
   async create(context) {
-    const configuration = context.instance.configuration as unknown as { executionType: TypeRef };
+    const configuration = context.instance.configuration as unknown as {
+      executionType: TypeRef;
+      repositoryContract?: DefinitionRef;
+    };
     const assembly = context.capability("profile.application") as Assembly;
     const subject = context.capability("local.subject") as {
       principalId: string;
       grants: readonly string[];
+      instanceGrants: Readonly<Record<string, readonly string[]>>;
     };
     const store = context.child("store") as ObjectStore & {
       storeId: string;
@@ -49,6 +54,8 @@ export const factory: NativeFactory = {
       context.instance.instanceId,
       context.instance.scopeId,
     );
+    for (const instance of assembly.instances)
+      store.registerNamespace(instance.stateNamespaceId, instance.instanceId, instance.scopeId);
     const types = (name: string): TypeRef => ({ ...configuration.executionType, name });
     const bridge = new EffectBridge({
       registry: context.registry,
@@ -80,6 +87,17 @@ export const factory: NativeFactory = {
         return assembly;
       },
       reducer: (ref, instanceId) => context.exported(ref, instanceId) as ReducerModule,
+      ...(configuration.repositoryContract
+        ? {
+            repository: new RepositoryBridge({
+              registry: context.registry,
+              contract: configuration.repositoryContract,
+              store: (instance) =>
+                context.exported(instance.implementation, instance.instanceId) as ObjectStore,
+              grants: (instance) => subject.instanceGrants[instance.instanceId] ?? [],
+            }),
+          }
+        : {}),
       outbox,
     });
     const backend = createExecutionBackend({
