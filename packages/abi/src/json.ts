@@ -1,4 +1,4 @@
-export function assertJson(value: unknown, maxDepth = 64): void {
+export function assertJson(value: unknown, maxDepth = 64, maxBytes = 1024 * 1024): void {
   const ancestors = new Set<object>();
   function visit(current: unknown, depth: number): void {
     if (depth > maxDepth)
@@ -42,7 +42,7 @@ export function assertJson(value: unknown, maxDepth = 64): void {
     ancestors.delete(current);
   }
   visit(value, 0);
-  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 1024 * 1024)
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > maxBytes)
     throw Object.assign(new Error("JSON size limit exceeded"), { code: "PAYLOAD_TOO_LARGE" });
 }
 
@@ -54,8 +54,8 @@ export function freezeJson<T>(value: T): T {
   return value;
 }
 
-export function canonicalJson(value: unknown): string {
-  assertJson(value);
+export function canonicalJson(value: unknown, maxBytes = 1024 * 1024): string {
+  assertJson(value, 64, maxBytes);
   function sorted(current: unknown): unknown {
     if (Array.isArray(current)) return current.map(sorted);
     if (current && typeof current === "object") {

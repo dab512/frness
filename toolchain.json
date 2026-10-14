@@ -6,5 +6,7 @@
   "tsx": "4.23.15",
   "nodeTypes": "24.19.2",
   "esbuild": "0.28.2",
-  "ajv": "8.20.0"
+  "ajv": "8.20.0",
+  "betterSqlite3": "13.0.3",
+  "betterSqlite3Types": "9.6.0"
 }
