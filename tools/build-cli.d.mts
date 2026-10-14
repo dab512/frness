@@ -5,5 +5,6 @@ export function buildCli(
   options?: {
     readonly packages?: NonNullable<Parameters<typeof buildBootstrap>[1]>["packages"];
     readonly addons?: boolean;
+    readonly providers?: readonly ("codex" | "claude")[];
   },
 ): Promise<BootLock>;

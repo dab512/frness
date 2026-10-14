@@ -165,7 +165,7 @@
       "blocker": null
     },
     "FH-18": {
-      "status": "in_progress",
+      "status": "not_started",
       "startedAt": "2026-10-14T18:59:17.604Z",
       "completedAt": null,
       "evidence": [],
@@ -264,5 +264,27 @@
       "evidence": [],
       "blocker": null
     }
+  },
+  "scope": "minimal-self-host; remaining roadmap deferred by user",
+  "selfhost": {
+    "status": "bootstrap_verified",
+    "evidence": [
+      "apps/cli/src/selfhost.ts",
+      "tests/atoms/selfhost.test.ts",
+      "docs/selfhost.md"
+    ],
+    "checks": {
+      "fullSuiteBeforeExtensionTest": 113,
+      "selfhostTests": 4,
+      "lint": "passed",
+      "typecheck": "passed",
+      "spec": "passed",
+      "boundaries": "passed"
+    },
+    "liveAgentAuthoredPlugin": "not_verified: Codex command approval failed; Claude cancelled before edits",
+    "deferred": [
+      "remaining roadmap",
+      "full hot reload"
+    ]
   }
 }

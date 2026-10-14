@@ -32,7 +32,7 @@ export async function buildCli(directory, options = {}) {
         files: { "server.mjs": await buildServerModule("plugins/agent-runtime/src/module.ts") },
         activations: ["activate"],
       }),
-      ...["codex", "claude"].map((provider) => async (meta, lookup) => ({
+      ...(options.providers ?? ["codex", "claude"]).map((provider) => async (meta, lookup) => ({
         manifest: providerManifest(provider, meta, lookup),
         files: {
           "server.mjs": await buildServerModule(
