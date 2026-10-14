@@ -1,0 +1,57 @@
+{
+  "format": 1,
+  "atomId": "FH-08",
+  "gateId": "AT-008",
+  "checkedAt": "2026-10-14T15:10:57.307Z",
+  "node": "v24.4.1",
+  "passed": true,
+  "checks": [
+    {
+      "name": "lint",
+      "command": [
+        "npm",
+        "run",
+        "lint"
+      ],
+      "exitCode": 0
+    },
+    {
+      "name": "types",
+      "command": [
+        "npm",
+        "run",
+        "typecheck"
+      ],
+      "exitCode": 0
+    },
+    {
+      "name": "specification",
+      "command": [
+        "npm",
+        "run",
+        "spec:check"
+      ],
+      "exitCode": 0
+    },
+    {
+      "name": "boundaries",
+      "command": [
+        "npm",
+        "run",
+        "check:boundaries"
+      ],
+      "exitCode": 0
+    },
+    {
+      "name": "atomic",
+      "command": [
+        "npm",
+        "run",
+        "test:atom",
+        "--",
+        "tests/atoms/FH-08.test.ts"
+      ],
+      "exitCode": 0
+    }
+  ]
+}

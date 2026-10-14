@@ -1,6 +1,6 @@
 {
   "format": 1,
-  "updatedAt": "2026-10-14T15:05:53.733Z",
+  "updatedAt": "2026-10-14T15:11:37.806Z",
   "atoms": {
     "FH-00": {
       "status": "done",
@@ -75,10 +75,12 @@
       "blocker": null
     },
     "FH-08": {
-      "status": "not_started",
-      "startedAt": null,
-      "completedAt": null,
-      "evidence": [],
+      "status": "done",
+      "startedAt": "2026-10-14T15:06:04.263Z",
+      "completedAt": "2026-10-14T15:11:37.806Z",
+      "evidence": [
+        "verification/FH-08.json"
+      ],
       "blocker": null
     },
     "FH-09": {
