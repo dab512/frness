@@ -1,0 +1,16 @@
+{
+  "name": "fractal-harness-specification",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:spec": "node tools/check-spec.mjs",
+    "typecheck": "tsc --strict --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext contracts.ts standard-contracts.ts acceptance-api.ts",
+    "test:acceptance": "node --test tests/acceptance.test.mjs",
+    "check": "npm run typecheck && npm run check:spec"
+  },
+  "devDependencies": {
+    "@cucumber/gherkin": "42.0.1",
+    "typescript": "5.9.3"
+  }
+}
