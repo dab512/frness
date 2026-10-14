@@ -58,6 +58,8 @@ commitKey имеет scope store + principal + scope + ownerInstance. Повто
 
 ## C06 Canonical payload и ключи идемпотентности
 
+Уточнение C05 для ссылок внутри одного batch: `RecordWrite.revision` необязателен и задаёт заранее выделенный opaque revision ID. Если он отсутствует, ID выделяет store. Если задан, store проверяет непустую строку и отсутствие этой revision в истории данного объекта до любых writes; повтор revision отклоняется `REVISION_CONFLICT`. Это позволяет completion, Attempt.result и EffectResolution.result ссылаться на одну новую immutable revision внутри атомарного T4. Сам revision не является правом доступа и не отменяет expectedRevision/readSet. Повтор идентичного commitKey/payload возвращает прежний receipt до проверки повторного revision.
+
 canonical-json-v1: сначала проверить C01; рекурсивно отсортировать object keys через стандартный Array.sort() JS; порядок arrays сохранить; сериализовать JSON.stringify без пробелов. -0 становится 0. Hash = SHA-256 UTF-8 canonical JSON. Этот алгоритм закреплён; изменение создаёт новую версию, старые hash не пересчитываются.
 
 InvocationRequest input проверяется по OperationDefinition до сохранения Request. Для всех публичных invoke idempotencyKey обязателен, 1..128 ASCII символов. Scope ключа: principalId + scopeId + targetInstanceId + operation exact ref. Body hash включает operation, target, input и закреплённую assemblyRevision; права не включаются и проверяются на каждом повторе. Дубликат возвращает исходные Request/Invocation refs. Новый желаемый запуск требует нового ключа.

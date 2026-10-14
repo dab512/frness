@@ -253,6 +253,11 @@ export class SqliteObjectStore implements ObjectStore {
     const ids = new Set<string>();
     for (const write of batch.writes) {
       this.#authorize(context, write.object);
+      if (
+        write.revision !== undefined &&
+        (typeof write.revision !== "string" || !write.revision || write.revision.length > 256)
+      )
+        fail("INVALID_INPUT", "Planned revision must be a bounded opaque ID");
       const key = JSON.stringify([write.object.namespaceId, write.object.objectId]);
       if (ids.has(key)) fail("INVALID_INPUT", "One object cannot be written twice in a batch");
       ids.add(key);
@@ -297,6 +302,13 @@ export class SqliteObjectStore implements ObjectStore {
         }
         for (const write of batch.writes) {
           const current = this.#head(write.object);
+          if (
+            write.revision !== undefined &&
+            this.#db
+              .prepare("SELECT 1 FROM revisions WHERE namespace=? AND object_id=? AND revision=?")
+              .get(write.object.namespaceId, write.object.objectId, write.revision)
+          )
+            fail("REVISION_CONFLICT", "Planned revision is already immutable");
           if (write.kind === "create") {
             if (current) fail("OBJECT_EXISTS", "Object already exists");
           } else if (!current || current.revision !== write.expectedRevision)
@@ -317,7 +329,7 @@ export class SqliteObjectStore implements ObjectStore {
         }
         const records: VersionedObjectRef[] = [];
         for (const write of batch.writes) {
-          const revision = randomUUID();
+          const revision = write.revision ?? randomUUID();
           const deleted = write.kind === "tombstone" ? 1 : 0;
           const value = write.kind === "tombstone" ? "null" : canonicalJson(write.value);
           const type = canonicalJson(write.object.type);

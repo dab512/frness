@@ -120,10 +120,11 @@ export interface ExecutionContext {
   readonly assemblyRevision: Revision;
   readonly grants: readonly string[];
 }
-export type RecordWrite =
+export type RecordWrite = (
   | { readonly kind: "create"; readonly object: ObjectRef; readonly value: Json }
   | { readonly kind: "replace"; readonly object: ObjectRef; readonly expectedRevision: Revision; readonly value: Json }
-  | { readonly kind: "tombstone"; readonly object: ObjectRef; readonly expectedRevision: Revision };
+  | { readonly kind: "tombstone"; readonly object: ObjectRef; readonly expectedRevision: Revision }
+) & { readonly revision?: Revision };
 export interface CommitBatch {
   readonly commitKey: Id;
   readonly readSet: readonly VersionedObjectRef[];
