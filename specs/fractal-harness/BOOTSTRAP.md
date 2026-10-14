@@ -191,6 +191,8 @@ Browser выполняет отдельную candidate activation только 
 
 Binder не выполняет внешний запрос. Повторные execute/reconcile используют один bound export на instance и pinned implementation. Полученный export не заменяет опубликованные module exports и не меняет другие instances.
 
+Binder также получает необязательный readonly `component: {instance, assembly}` с закреплённой композицией. Это данные, а не capability на I/O. Плагин может проверить собственные обязательные child bindings; например, acceptance policy вычисляется из установленного поддерева проверок и не принимается из ответа модели.
+
 | ID | Подготовка и действие | Точный оракул |
 | --- | --- | --- |
 | `META-001` | Загрузить минимальный seed из восьми определений, затем проверить их публичным meta-validator | Все восемь имеют resolved metaType `std.meta.Type`; self-validation проходит; в registry нет source local refs; неизвестные предметные типы не встроены в host |

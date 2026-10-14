@@ -127,6 +127,7 @@ export async function startDaemon(
         typeof decorator.bindCapabilities === "function"
           ? decorator.bindCapabilities({
               registry,
+              component: { instance, assembly: application! },
               capability: (name) => capability(instanceId, name),
             })
           : value;

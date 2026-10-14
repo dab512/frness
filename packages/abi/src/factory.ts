@@ -1,4 +1,10 @@
-import type { ComponentInstance, DefinitionRecord, DefinitionRef, TypeRef } from "./index.js";
+import type {
+  Assembly,
+  ComponentInstance,
+  DefinitionRecord,
+  DefinitionRef,
+  TypeRef,
+} from "./index.js";
 
 export interface DefinitionReader {
   get(ref: DefinitionRef): DefinitionRecord & { readonly ref: DefinitionRef };
@@ -27,6 +33,7 @@ export interface NativeFactory {
 export interface CapabilityBoundExport {
   bindCapabilities(context: {
     readonly registry: DefinitionReader;
+    readonly component?: { readonly instance: ComponentInstance; readonly assembly: Assembly };
     capability(name: string): unknown;
   }): unknown;
 }
