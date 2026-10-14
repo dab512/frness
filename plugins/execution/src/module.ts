@@ -52,7 +52,7 @@ export const factory: NativeFactory = {
     const types = (name: string): TypeRef => ({ ...configuration.executionType, name });
     const bridge = new EffectBridge({
       registry: context.registry,
-      adapter: (ref) => context.exported(ref) as EffectAdapter,
+      adapter: (ref, instanceId) => context.exported(ref, instanceId) as EffectAdapter,
       account: (instance) => `local:${instance.instanceId}`,
       policy: () => ({ strategy: "non-retryable", maxAttempts: 1, idempotencyValidUntil: null }),
     });

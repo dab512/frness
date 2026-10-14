@@ -24,7 +24,7 @@ interface SchemaCapability {
 }
 export interface EffectBridgeOptions {
   readonly registry: SchemaCapability;
-  readonly adapter: (ref: DefinitionRef) => EffectAdapter;
+  readonly adapter: (ref: DefinitionRef, instanceId: string) => EffectAdapter;
   readonly account: (instance: ComponentInstance) => string;
   readonly policy: (instance: ComponentInstance, operation: OperationRef) => RetryPolicy;
   readonly timeoutMs?: number;
@@ -169,7 +169,7 @@ export class EffectBridge {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const outcome = await Promise.race([
-        call(this.options.adapter(effect.adapter), effect),
+        call(this.options.adapter(effect.adapter, effect.adapterInstanceId), effect),
         new Promise<EffectOutcome>((resolve) => {
           timer = setTimeout(
             () => resolve(unknown("Effect deadline elapsed without authoritative receipt")),

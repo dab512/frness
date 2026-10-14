@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import Database from "better-sqlite3";
 import type { BootstrapDescription } from "../../../packages/abi/src/bootstrap.js";
 import type {
+  CapabilityBoundExport,
   DefinitionReader,
   FactoryContext,
   NativeFactory,
@@ -14,6 +15,7 @@ import type {
   DefinitionRef,
   ImplementationDefinition,
 } from "../../../packages/abi/src/index.js";
+import { definitionKey } from "../../../packages/abi/src/references.js";
 import { bootstrap } from "../../../packages/host/src/bootstrap.js";
 import { protocolError } from "../../../plugins/api/src/protocol.js";
 import type { AssemblyLinker } from "../../../plugins/meta/src/linker.js";
@@ -61,9 +63,63 @@ export async function startDaemon(
     const instances = new Map<string, NativeService>();
     const implementation = (ref: DefinitionRef) =>
       registry.get(ref).value as unknown as ImplementationDefinition;
-    const exported = (ref: DefinitionRef) => {
+    const capability = (id: string, name: string): unknown => {
+      if (!(profile.grants[id] ?? []).includes(name))
+        throw Object.assign(new Error("Capability is not granted"), { code: "CAPABILITY_DENIED" });
+      if (name === "native.sqlite") return Database;
+      if (name === "data.directory") return resolve(profile.dataDirectory);
+      if (name === "profile.application") return application;
+      if (name === "local.subject") return { principalId: profile.principalId, grants };
+      if (name === "network") return fetch;
+      if (name === "credential")
+        return (binding: string) => {
+          const source = profile.credentials[binding];
+          const value = source?.instances.includes(id)
+            ? environment[source.environment]
+            : undefined;
+          if (!value)
+            throw Object.assign(new Error("Credential binding unavailable"), {
+              code: "CAPABILITY_DENIED",
+            });
+          return value;
+        };
+      throw Object.assign(new Error("Unknown capability"), { code: "CAPABILITY_DENIED" });
+    };
+    const boundExports = new Map<string, unknown>();
+    const exported = (ref: DefinitionRef, instanceId?: string) => {
       const definition = implementation(ref);
-      return generation.getExport(ref.digest, definition.entry);
+      const value = generation.getExport(ref.digest, definition.entry);
+      if (instanceId === undefined) return value;
+      const instance = application?.instances.find((item) => item.instanceId === instanceId);
+      if (
+        !instance ||
+        definitionKey(instance.implementation) !== definitionKey(ref) ||
+        definition.requiredCapabilities.some(
+          (name) => !(profile.grants[instanceId] ?? []).includes(name),
+        )
+      )
+        throw Object.assign(new Error("Application capability missing"), {
+          code: "CAPABILITY_DENIED",
+        });
+      const key = JSON.stringify([instanceId, definitionKey(ref)]);
+      if (boundExports.has(key)) return boundExports.get(key);
+      const decorator = value as Partial<CapabilityBoundExport>;
+      const bound =
+        typeof decorator.bindCapabilities === "function"
+          ? decorator.bindCapabilities({
+              registry,
+              capability: (name) => capability(instanceId, name),
+            })
+          : value;
+      if (
+        definition.abi === "effect-adapter.v1" &&
+        (!bound ||
+          typeof (bound as { execute?: unknown }).execute !== "function" ||
+          typeof (bound as { reconcile?: unknown }).reconcile !== "function")
+      )
+        throw Object.assign(new Error("Bound export has invalid ABI"), { code: "INVALID_OUTPUT" });
+      boundExports.set(key, bound);
+      return bound;
     };
     const instantiate = async (id: string): Promise<NativeService> => {
       const existing = instances.get(id);
@@ -96,29 +152,7 @@ export async function startDaemon(
             .filter((binding) => binding.slot === slot)
             .map((binding) => instances.get(binding.childInstanceId)!.value);
         },
-        capability(name) {
-          if (!effective.includes(name))
-            throw Object.assign(new Error("Capability is not granted"), {
-              code: "CAPABILITY_DENIED",
-            });
-          if (name === "native.sqlite") return Database;
-          if (name === "data.directory") return resolve(profile.dataDirectory);
-          if (name === "profile.application") return application;
-          if (name === "local.subject") return { principalId: profile.principalId, grants };
-          if (name === "credential")
-            return (binding: string) => {
-              const source = profile.credentials[binding];
-              const value = source?.instances.includes(id)
-                ? environment[source.environment]
-                : undefined;
-              if (!value)
-                throw Object.assign(new Error("Credential binding unavailable"), {
-                  code: "CAPABILITY_DENIED",
-                });
-              return value;
-            };
-          throw Object.assign(new Error("Unknown capability"), { code: "CAPABILITY_DENIED" });
-        },
+        capability: (name) => capability(id, name),
       };
       const factory = exported(instance.implementation) as NativeFactory;
       if (definition.abi !== "factory.v1")

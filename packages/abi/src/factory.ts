@@ -17,8 +17,16 @@ export interface FactoryContext {
   child(slot: string): unknown;
   children(slot: string): readonly unknown[];
   capability(name: string): unknown;
-  exported(implementation: DefinitionRef): unknown;
+  exported(implementation: DefinitionRef, instanceId?: string): unknown;
 }
 export interface NativeFactory {
   create(context: FactoryContext): Promise<NativeService>;
+}
+
+/** Optional native export decorator; the resulting value still satisfies its declared ABI. */
+export interface CapabilityBoundExport {
+  bindCapabilities(context: {
+    readonly registry: DefinitionReader;
+    capability(name: string): unknown;
+  }): unknown;
 }
