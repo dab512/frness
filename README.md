@@ -6,6 +6,8 @@
 
 **Текущая цель — [минимальный self-host](CURRENT-SCOPE.md).** Полный roadmap служит справочником: следующие расширения должен создавать агент через сам FRNESS.
 
+Оконное приложение: `npm run desktop` — [Electron bootstrap](docs/desktop.md).
+
 Запуск минимальной сборки: [self-host CLI](docs/selfhost.md). Полный план ниже сохранён как backlog.
 
 - [Начать с пакета спецификаций](specs/fractal-harness/README.md).

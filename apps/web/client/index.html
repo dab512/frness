@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>FRNESS</title>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="renderer.mjs"></script>
+</head>
+<body>
+<header><div class="brand"><span class="symbol" aria-hidden="true">✳</span><strong>frness</strong></div><button id="new" class="quiet">Новый диалог</button></header>
+<main>
+<section class="configuration" aria-label="Настройки запуска">
+<div><label>Рабочая папка</label><button id="workspace" class="folder" title="Выбрать рабочую папку">Выбрать папку</button></div>
+<div><label for="provider">Агент</label><select id="provider"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></div>
+</section>
+<div id="messages" role="log" aria-label="Диалог" aria-live="polite"></div>
+<section id="empty"><h1>С чего начнём?</h1><p>Задайте агенту небольшую задачу.<br>Он будет работать в выбранной папке.</p></section>
+<form id="composer"><label for="prompt">Ваш запрос</label><textarea id="prompt" rows="4" placeholder="Что нужно сделать?" required></textarea><div class="controls"><span id="hint">⌘ Enter — отправить</span><button id="stop" type="button" class="quiet" hidden>Остановить</button><button id="send" type="submit">Отправить</button></div></form>
+<footer><span id="status" role="status">Готов</span><span id="session">Новый диалог</span></footer>
+</main>
+</body>
+</html>

@@ -286,5 +286,27 @@
       "remaining roadmap",
       "full hot reload"
     ]
+  },
+  "desktop": {
+    "status": "minimal_bootstrap_verified",
+    "stack": "Electron 44.7.2; isolated local renderer; Node 24 selfhost worker",
+    "evidence": [
+      "apps/web/desktop/main.mjs",
+      "tests/desktop/electron.test.ts",
+      "docs/desktop.md"
+    ],
+    "checks": {
+      "coreTests": 114,
+      "electronTests": 2,
+      "lint": "passed",
+      "typecheck": "passed",
+      "spec": "passed",
+      "boundaries": "passed"
+    },
+    "limitations": [
+      "source checkout launcher; no packaged installer",
+      "UI slot renderer and hot reload deferred",
+      "live CLI tool permissions unchanged; UI tests use fake CLI"
+    ]
   }
 }
