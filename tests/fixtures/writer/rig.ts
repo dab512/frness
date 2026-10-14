@@ -6,6 +6,7 @@ import { executionManifest } from "../../../plugins/execution/definitions/manife
 import { BudgetLedger } from "../../../plugins/execution/src/budget.js";
 import { EffectBridge } from "../../../plugins/execution/src/effect-adapter.js";
 import { ExecutionService } from "../../../plugins/execution/src/ingress.js";
+import type { CrashCut } from "../../../plugins/execution/src/outbox.js";
 import { DurableOutbox } from "../../../plugins/execution/src/outbox.js";
 import { AssemblyLinker } from "../../../plugins/meta/src/linker.js";
 import { DefinitionRegistry } from "../../../plugins/meta/src/registry.js";
@@ -26,7 +27,13 @@ export async function createWriterRig(
   directory: string,
   endpoint: string,
   policy: RetryPolicy,
-  options: { readonly budget?: BudgetSpec; readonly maxUnits?: number } = {},
+  options: {
+    readonly budget?: BudgetSpec;
+    readonly maxUnits?: number;
+    readonly commandCount?: number;
+    readonly awaitInput?: boolean;
+    readonly onCut?: (point: CrashCut) => Promise<void>;
+  } = {},
 ) {
   const distribution = join(directory, "distribution");
   await buildBootstrap(distribution, {
@@ -73,7 +80,11 @@ export async function createWriterRig(
       {
         instanceId: "parent",
         implementation: ref("Parent"),
-        configuration: {},
+        configuration: {
+          ...(options.maxUnits !== undefined ? { maxUnits: options.maxUnits } : {}),
+          ...(options.commandCount !== undefined ? { commandCount: options.commandCount } : {}),
+          ...(options.awaitInput ? { mode: "await" } : {}),
+        },
         stateNamespaceId: "parent",
         scopeId: "scope",
       },
@@ -107,7 +118,7 @@ export async function createWriterRig(
   store.registerNamespace("runtime", "execution", "scope");
   const module = (await import(
     pathToFileURL(join(distribution, "test.writer/server.mjs")).href
-  )) as { writer: EffectAdapter; parent: ReducerModule };
+  )) as { writer: EffectAdapter; parent: ReducerModule; root: ReducerModule };
   const bridge = new EffectBridge({
     registry,
     adapter: () => module.writer,
@@ -132,6 +143,7 @@ export async function createWriterRig(
     types: (name) => ref(name, "std.execution"),
     bridge,
     runnerEpoch: "test-epoch",
+    ...(options.onCut ? { cut: options.onCut } : {}),
     ...(ledger ? { budget: { ledger, scope: () => "root" } } : {}),
   });
   const runtime = new ExecutionService({
@@ -146,21 +158,7 @@ export async function createWriterRig(
       if (!found) throw new Error("Missing pinned assembly");
       return found;
     },
-    reducer: () =>
-      options.maxUnits === undefined
-        ? module.parent
-        : {
-            initialize: module.parent.initialize,
-            reduce(state, event, config) {
-              const result = module.parent.reduce(state, event, config);
-              return {
-                state: result.state,
-                commands: result.commands.map((command) =>
-                  command.kind === "effect" ? { ...command, maxUnits: options.maxUnits! } : command,
-                ),
-              };
-            },
-          },
+    reducer: (implementation) => (implementation.name === "Root" ? module.root : module.parent),
     outbox,
   });
   return {

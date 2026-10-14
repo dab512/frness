@@ -17,12 +17,33 @@ export const writer = {
   reconcile: ({ effect, attemptId }) => request("reconcile", effect, attemptId),
 };
 export const parent = {
-  initialize: () => ({}),
-  reduce(state, event) {
-    if (event.type.name === "EffectCompleted")
-      return { state, commands: [{ kind: "complete", output: event.value.output }] };
+  initialize: () => ({ outputs: {} }),
+  reduce(state, event, config) {
+    if (event.type.name === "EffectCompleted") {
+      const outputs = { ...state.outputs, [event.value.commandId]: event.value.output };
+      return {
+        state: { outputs },
+        commands:
+          Object.keys(outputs).length === (config.commandCount ?? 1)
+            ? [{ kind: "complete", output: event.value.output }]
+            : [],
+      };
+    }
     if (event.type.name === "EffectFailed")
       return { state, commands: [{ kind: "fail", error: event.value.error }] };
+    if (event.type.name === "InputProvided")
+      return { state, commands: [{ kind: "complete", output: { externalId: event.value.input } }] };
+    if (config.mode === "await")
+      return {
+        state,
+        commands: [
+          {
+            kind: "awaitInput",
+            commandId: "answer",
+            inputType: { ...event.value.operation.contract, name: "TextAnswer" },
+          },
+        ],
+      };
     return {
       state,
       commands: [
@@ -35,7 +56,34 @@ export const parent = {
             operation: "run",
           },
           input: event.value.input,
-          maxUnits: 0,
+          maxUnits: config.maxUnits ?? 0,
+        },
+      ].flatMap((command) =>
+        Array.from({ length: config.commandCount ?? 1 }, (_, index) => ({
+          ...command,
+          commandId:
+            (config.commandCount ?? 1) === 1 ? command.commandId : `${command.commandId}-${index}`,
+        })),
+      ),
+    };
+  },
+};
+export const root = {
+  initialize: () => ({ outputs: {} }),
+  reduce(state, event) {
+    if (event.type.name === "ChildCompleted")
+      return { state, commands: [{ kind: "complete", output: event.value.output }] };
+    if (event.type.name === "ChildFailed")
+      return { state, commands: [{ kind: "fail", error: event.value.error }] };
+    return {
+      state,
+      commands: [
+        {
+          kind: "callChild",
+          commandId: "child",
+          slot: "parent",
+          operation: "run",
+          input: event.value.input,
         },
       ],
     };

@@ -90,6 +90,12 @@ export const executionSchemas: Readonly<Record<string, JsonSchema>> = {
     issuedCommands: { ...list(string), uniqueItems: true },
     parentInvocation: { anyOf: [objectRef, { type: "null" }] },
     depth: { type: "integer", minimum: 0 },
+    inboxIds: { ...list(string), uniqueItems: true },
+    awaitingInputs: { type: "object", additionalProperties: definitionRef },
+    pendingKinds: {
+      type: "object",
+      additionalProperties: { enum: ["callChild", "effect", "awaitInput"] },
+    },
   }),
   InputReceived: object({ invocation: objectRef, operation: operationRef, input: json }),
   ChildCompleted: object({ commandId: string, output: json }),
@@ -108,4 +114,8 @@ export const executionSchemas: Readonly<Record<string, JsonSchema>> = {
     delivered: { type: "boolean" },
   }),
   Receipt: object({ request: objectRef, invocation: objectRef }),
+  InvocationIndex: object({ objects: { type: "array", items: objectRef, maxItems: 10000 } }),
+  ControlReceipt: object({ command: { enum: ["pause", "resume", "cancel"] }, snapshot: {} }),
+  InputProvided: object({ commandId: string, input: {} }),
+  InputDelivery: object({ invocation: objectRef, commandId: string, input: {}, inbox: objectRef }),
 };

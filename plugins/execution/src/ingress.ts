@@ -23,6 +23,7 @@ import type {
   ReducerModule,
   TypeRef,
 } from "../../../specs/fractal-harness/contracts.js";
+import { InvocationControl } from "./control.js";
 import { invocationIdentity } from "./idempotency.js";
 import type { CrashCut, DurableOutbox } from "./outbox.js";
 import { executionError, initialize, type ReducerValidation, transition } from "./reducer.js";
@@ -54,6 +55,9 @@ interface InvocationState {
   issuedCommands: string[];
   parentInvocation: ObjectRef | null;
   depth: number;
+  inboxIds: string[];
+  awaitingInputs: Record<string, TypeRef>;
+  pendingKinds: Record<string, "callChild" | "effect" | "awaitInput">;
 }
 interface Inbox {
   invocation: ObjectRef;
@@ -81,8 +85,10 @@ const terminal = (snapshot: InvocationSnapshot): boolean =>
 
 export class ExecutionService {
   readonly #options: ExecutionOptions;
+  readonly controls: InvocationControl;
   constructor(options: ExecutionOptions) {
     this.#options = { ...options, context: freezeJson(structuredClone(options.context)) };
+    this.controls = options.outbox?.control ?? new InvocationControl(options);
   }
   #ref(type: string, id: string): ObjectRef {
     return {
@@ -179,6 +185,9 @@ export class ExecutionService {
         throw executionError("IDEMPOTENCY_CONFLICT", "Invocation key has a different payload");
       return receipt;
     }
+    const parentGuard = lineage ? await this.controls.guard(lineage.parent) : undefined;
+    if (parentGuard && !parentGuard.allowed)
+      throw executionError("CAPABILITY_DENIED", "Ancestor control prevents a new child invocation");
     const state = initialize(
       this.#options.reducer(resolved.instance.implementation),
       request.input,
@@ -224,6 +233,9 @@ export class ExecutionService {
           issuedCommands: [],
           parentInvocation: lineage?.parent ?? null,
           depth: lineage?.depth ?? 0,
+          inboxIds: ["input"],
+          awaitingInputs: {},
+          pendingKinds: {},
         }),
       },
       {
@@ -233,9 +245,22 @@ export class ExecutionService {
       },
       { kind: "create", object: receiptRef, value: json(receipt) },
     ];
+    const indexRef = this.#ref("InvocationIndex", "index");
+    const index = await this.#maybeRead(indexRef);
+    const objects = index ? (index.value as unknown as { objects: ObjectRef[] }).objects : [];
+    writes.push(
+      index
+        ? {
+            kind: "replace",
+            object: indexRef,
+            expectedRevision: index.revision,
+            value: json({ objects: [...objects, receipt.invocation] }),
+          }
+        : { kind: "create", object: indexRef, value: json({ objects: [receipt.invocation] }) },
+    );
     await this.#options.store.commit(this.#options.context, {
       commitKey: `submit/${id}`,
-      readSet: [],
+      readSet: parentGuard?.readSet ?? [],
       writes,
       events: [event],
     });
@@ -301,6 +326,24 @@ export class ExecutionService {
     const invocationRecord = await this.#read(invocation);
     const snapshot = invocationRecord.value as unknown as InvocationSnapshot;
     if (terminal(snapshot) || snapshot.control !== "running") return;
+    const controls = await this.controls.guard(invocation);
+    if (!controls.allowed) return;
+    if (snapshot.phase !== "active") {
+      await this.#options.store.commit(this.#options.context, {
+        commitKey: `active/${inbox.event.eventId}`,
+        readSet: controls.readSet,
+        events: [],
+        writes: [
+          {
+            kind: "replace",
+            object: invocation,
+            expectedRevision: invocationRecord.revision,
+            value: json({ ...snapshot, phase: "active", waitingReason: null }),
+          },
+        ],
+      });
+      return this.step(invocation, inboxId);
+    }
     const stateRecord = await this.#read(this.#associated("State", invocation));
     const state = stateRecord.value as unknown as InvocationState;
     const requestRecord = await this.#read(state.request);
@@ -384,6 +427,14 @@ export class ExecutionService {
       return;
     }
     const next: MutableSnapshot = { ...snapshot, phase: "active", waitingReason: null };
+    if (state.pendingCommands.length) {
+      next.phase = "waiting";
+      next.waitingReason = Object.values(state.pendingKinds).includes("awaitInput")
+        ? "input"
+        : Object.values(state.pendingKinds).includes("callChild")
+          ? "child"
+          : "effect";
+    }
     for (const command of result.commands) {
       if (command.kind === "complete") {
         next.phase = "succeeded";
@@ -412,6 +463,7 @@ export class ExecutionService {
       readSet: [
         { object: requestRecord.object, revision: requestRecord.revision },
         ...effects.readSet,
+        ...controls.readSet,
       ],
       events: [],
       writes: [
@@ -431,6 +483,22 @@ export class ExecutionService {
             steps: state.steps + 1,
             pendingCommands: [...state.pendingCommands, ...pending],
             issuedCommands: [...state.issuedCommands, ...pending],
+            pendingKinds: {
+              ...state.pendingKinds,
+              ...Object.fromEntries(
+                result.commands.flatMap((command) =>
+                  "commandId" in command ? [[command.commandId, command.kind]] : [],
+                ),
+              ),
+            },
+            awaitingInputs: {
+              ...state.awaitingInputs,
+              ...Object.fromEntries(
+                result.commands.flatMap((command) =>
+                  command.kind === "awaitInput" ? [[command.commandId, command.inputType]] : [],
+                ),
+              ),
+            },
           }),
         },
         {
@@ -449,6 +517,90 @@ export class ExecutionService {
     });
     if (hasEffects) await this.#options.cut?.("after_prepare_commit");
     else await this.#options.cut?.("after_reduce_commit");
+  }
+  async provideInput(
+    invocation: ObjectRef,
+    commandId: string,
+    input: Json,
+    key: string,
+  ): Promise<ObjectRef> {
+    this.#assertInvocation(invocation);
+    if (!/^[\x00-\x7f]{1,128}$/.test(key))
+      throw executionError("INVALID_INPUT", "Input key must contain 1 to 128 ASCII characters");
+    const id = hash([
+      this.#options.context.principalId,
+      this.#options.context.scopeId,
+      invocation,
+      key,
+    ]);
+    const deliveryRef = this.#ref("InputDelivery", id);
+    const previous = await this.#maybeRead(deliveryRef);
+    if (previous) {
+      const delivery = previous.value as unknown as {
+        commandId: string;
+        input: Json;
+        inbox: ObjectRef;
+      };
+      if (
+        delivery.commandId !== commandId ||
+        canonicalJson(delivery.input) !== canonicalJson(input)
+      )
+        throw executionError("IDEMPOTENCY_CONFLICT", "Input key has a different body");
+      return delivery.inbox;
+    }
+    const controls = await this.controls.guard(invocation);
+    if (
+      controls.records.some(
+        (entry) => terminal(entry.snapshot) || entry.snapshot.control === "cancel_requested",
+      )
+    )
+      throw executionError("CAPABILITY_DENIED", "Input is no longer accepted");
+    const stateRecord = await this.#read(this.#associated("State", invocation));
+    const state = stateRecord.value as unknown as InvocationState;
+    const inputType = state.awaitingInputs[commandId];
+    if (!inputType)
+      throw executionError("INVALID_INPUT", "Invocation is not waiting for this input");
+    this.#options.registry.validate(inputType, input);
+    const inboxRef = this.#associated("Inbox", invocation, `input:${commandId}`);
+    const event: ReducerEvent = {
+      eventId: hash([invocation, commandId, "input"]),
+      type: this.#options.types("InputProvided"),
+      value: json({ commandId, input }),
+    };
+    await this.#options.store.commit(this.#options.context, {
+      commitKey: `input/${id}`,
+      readSet: controls.readSet,
+      events: [event],
+      writes: [
+        {
+          kind: "create",
+          object: deliveryRef,
+          value: json({ invocation, commandId, input, inbox: inboxRef }),
+        },
+        {
+          kind: "create",
+          object: inboxRef,
+          value: json({ invocation, event, consumed: false, error: null }),
+        },
+        {
+          kind: "replace",
+          object: stateRecord.object,
+          expectedRevision: stateRecord.revision,
+          value: json({
+            ...state,
+            pendingCommands: state.pendingCommands.filter((id) => id !== commandId),
+            pendingKinds: Object.fromEntries(
+              Object.entries(state.pendingKinds).filter(([id]) => id !== commandId),
+            ),
+            awaitingInputs: Object.fromEntries(
+              Object.entries(state.awaitingInputs).filter(([id]) => id !== commandId),
+            ),
+            inboxIds: [...state.inboxIds, `input:${commandId}`],
+          }),
+        },
+      ],
+    });
+    return inboxRef;
   }
   async startChild(
     parent: ObjectRef,
@@ -528,12 +680,21 @@ export class ExecutionService {
           value: json({
             ...state,
             pendingCommands: state.pendingCommands.filter((id) => id !== commandId),
+            pendingKinds: Object.fromEntries(
+              Object.entries(state.pendingKinds).filter(([id]) => id !== commandId),
+            ),
+            inboxIds: [...state.inboxIds, `child:${commandId}`],
           }),
         },
         {
           kind: "create",
           object: this.#associated("Inbox", parent, `child:${commandId}`),
-          value: json({ invocation: parent, event, consumed: false, error: null }),
+          value: json({
+            invocation: parent,
+            event,
+            consumed: terminal(await this.snapshot(parent)),
+            error: null,
+          }),
         },
       ],
     });

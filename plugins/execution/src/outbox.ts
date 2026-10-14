@@ -20,7 +20,8 @@ import type {
   ReservationRecord,
   TypeRef,
 } from "../../../specs/fractal-harness/contracts.js";
-import type { BudgetLedger, ReservationPlan } from "./budget.js";
+import type { BudgetPort, ReservationPlan } from "./budget-port.js";
+import { InvocationControl } from "./control.js";
 import type { EffectBridge } from "./effect-adapter.js";
 import type { ExecutionService } from "./ingress.js";
 import { executionError } from "./reducer.js";
@@ -42,7 +43,7 @@ export interface OutboxOptions {
   readonly bridge: EffectBridge;
   readonly runnerEpoch: string;
   readonly budget?: {
-    readonly ledger: BudgetLedger;
+    readonly ledger: BudgetPort;
     readonly scope: (invocation: ObjectRef) => string;
   };
   readonly cut?: (point: CrashCut) => Promise<void>;
@@ -57,6 +58,8 @@ interface OutboxIntent {
 }
 interface RuntimeState {
   pendingCommands: string[];
+  inboxIds: string[];
+  pendingKinds: Record<string, string>;
   readonly [key: string]: unknown;
 }
 const json = (value: unknown): Json => JSON.parse(canonicalJson(value)) as Json;
@@ -67,8 +70,13 @@ const terminal = (snapshot: InvocationSnapshot): boolean =>
 
 export class DurableOutbox {
   readonly bridge: EffectBridge;
+  readonly control: InvocationControl;
   constructor(readonly options: OutboxOptions) {
     this.bridge = options.bridge;
+    this.control = new InvocationControl({
+      ...options,
+      cancelPrepared: (root) => this.cancelPrepared(root),
+    });
   }
   #ref(type: string, id: string): ObjectRef {
     return {
@@ -217,6 +225,8 @@ export class DurableOutbox {
     const snapshot = invocationRecord.value as unknown as InvocationSnapshot;
     if (attempt.state !== "prepared" || snapshot.control !== "running" || terminal(snapshot))
       return;
+    const controls = await this.control.guard(intent.invocation);
+    if (!controls.allowed) return;
     const reservationRecord = await this.#read(intent.reservation);
     const effectRecord = await this.#read(intent.effect);
     const effect = effectRecord.value as unknown as EffectDefinition;
@@ -228,6 +238,7 @@ export class DurableOutbox {
         { object: effectRecord.object, revision: effectRecord.revision },
         { object: reservationRecord.object, revision: reservationRecord.revision },
         ...budgetGuards,
+        ...controls.readSet,
       ],
       events: [],
       writes: [
@@ -237,10 +248,14 @@ export class DurableOutbox {
           runnerEpoch: this.options.runnerEpoch,
         }),
         this.#replace(outboxRecord, { ...intent, status: "dispatched" }),
-        this.#replace(invocationRecord, {
-          ...snapshot,
-          unresolvedEffectIds: [...new Set([...snapshot.unresolvedEffectIds, effect.effectId])],
-        }),
+        ...controls.records.map((entry) =>
+          this.#replace(entry.record, {
+            ...entry.snapshot,
+            unresolvedEffectIds: [
+              ...new Set([...entry.snapshot.unresolvedEffectIds, effect.effectId]),
+            ],
+          }),
+        ),
       ],
     });
     await this.options.cut?.("after_dispatch_commit_before_transport");
@@ -249,7 +264,11 @@ export class DurableOutbox {
     await this.complete(ref, outcome);
     await this.options.cut?.("after_receipt_commit_before_reduce");
   }
-  async complete(ref: ObjectRef, outcome: EffectOutcome): Promise<void> {
+  async complete(
+    ref: ObjectRef,
+    outcome: EffectOutcome,
+    cancellation?: { readonly readSet: CommitBatch["readSet"] },
+  ): Promise<void> {
     const outboxRecord = await this.#read(ref);
     const intent = outboxRecord.value as unknown as OutboxIntent;
     const attemptRecord = await this.#read(intent.attempt);
@@ -269,7 +288,21 @@ export class DurableOutbox {
         throw executionError("COMPLETION_CONFLICT", "Attempt already has a different receipt");
       return;
     }
-    if (!["dispatched", "unknown"].includes(attempt.state))
+    if (
+      cancellation &&
+      attempt.state === "prepared" &&
+      !(await this.control.guard(intent.invocation)).records.some(
+        (entry) => entry.snapshot.control === "cancel_requested",
+      )
+    )
+      throw executionError(
+        "CAPABILITY_DENIED",
+        "Prepared cancellation has no committed control boundary",
+      );
+    if (
+      !["dispatched", "unknown"].includes(attempt.state) &&
+      !(cancellation && attempt.state === "prepared")
+    )
       throw executionError("INVALID_INPUT", "Attempt has not been dispatched");
     const invocationRecord = await this.#read(intent.invocation);
     const snapshot = invocationRecord.value as unknown as InvocationSnapshot;
@@ -401,17 +434,40 @@ export class DurableOutbox {
         this.#replace(stateRecord, {
           ...state,
           pendingCommands: state.pendingCommands.filter((id) => id !== intent.commandId),
+          pendingKinds: Object.fromEntries(
+            Object.entries(state.pendingKinds).filter(([id]) => id !== intent.commandId),
+          ),
+          inboxIds: [...state.inboxIds, `effect:${intent.commandId}`],
         }),
         {
           kind: "create",
           object: this.#associated("Inbox", intent.invocation, `effect:${intent.commandId}`),
-          value: json({ invocation: intent.invocation, event, consumed: false, error: null }),
+          value: json({
+            invocation: intent.invocation,
+            event,
+            consumed: terminal(snapshot),
+            error: null,
+          }),
         },
+      );
+    }
+    const ancestorFence = await this.control.guard(intent.invocation);
+    const ancestorReads = [...ancestorFence.readSet];
+    for (const entry of ancestorFence.records.slice(1)) {
+      const remaining = await this.#unresolved(entry.record.object, attempt.attemptId);
+      ancestorReads.push(...remaining.readSet);
+      writes.push(
+        this.#replace(entry.record, { ...entry.snapshot, unresolvedEffectIds: remaining.ids }),
       );
     }
     await this.options.store.commit(this.options.context, {
       commitKey: `receipt/${attempt.attemptId}`,
-      readSet: [...unresolved.readSet, ...(settlement?.readSet ?? [])],
+      readSet: [
+        ...unresolved.readSet,
+        ...ancestorReads,
+        ...(settlement?.readSet ?? []),
+        ...(cancellation?.readSet ?? []),
+      ],
       events: existingResolution ? [] : [event],
       writes,
     });
@@ -436,7 +492,10 @@ export class DurableOutbox {
     const readSet: { object: ObjectRef; revision: string }[] = [];
     for (const ref of await this.intents()) {
       const intent = (await this.#read(ref)).value as unknown as OutboxIntent;
-      if (intent.invocation.objectId !== invocation.objectId) continue;
+      const lineage = await this.control.guard(intent.invocation);
+      if (!lineage.records.some((entry) => entry.record.object.objectId === invocation.objectId))
+        continue;
+      readSet.push(...lineage.readSet);
       const record = await this.#read(intent.attempt);
       const attempt = record.value as unknown as AttemptRecord;
       readSet.push({ object: record.object, revision: record.revision });
@@ -447,6 +506,37 @@ export class DurableOutbox {
         ids.add(attempt.effectId);
     }
     return { ids: [...ids], readSet };
+  }
+  async cancelPrepared(root: ObjectRef): Promise<void> {
+    for (const ref of await this.intents()) {
+      const intent = (await this.#read(ref)).value as unknown as OutboxIntent;
+      const fence = await this.control.guard(intent.invocation);
+      const boundary = fence.records.find(
+        (entry) =>
+          entry.record.object.objectId === root.objectId &&
+          entry.snapshot.control === "cancel_requested",
+      );
+      if (!boundary) continue;
+      const attempt = (await this.#read(intent.attempt)).value as unknown as AttemptRecord;
+      if (attempt.state !== "prepared") continue;
+      await this.complete(
+        ref,
+        {
+          kind: "failed_known",
+          error: {
+            code: "CANCELLED_BEFORE_DISPATCH",
+            message: "Committed control prevents dispatch",
+            details: null,
+            retryable: false,
+          },
+          actualUnits: 0,
+          evidence: json({
+            control: { object: boundary.record.object, revision: boundary.record.revision },
+          }),
+        },
+        { readSet: fence.readSet },
+      );
+    }
   }
   async retry(ref: ObjectRef, now: string): Promise<ObjectRef | undefined> {
     const originalRecord = await this.#read(ref);

@@ -7,7 +7,7 @@ export function executionManifest(meta: (name: string) => DefinitionRef): Packag
   return {
     format: 1,
     packageId: "std.execution",
-    version: "1.2.0",
+    version: "1.3.0",
     hostAbi: "fractal.host.v1",
     dependencies: [meta("Type")],
     reload: { snapshotType: meta("NullSnapshot"), serverEntry: "reload", clientEntry: null },
