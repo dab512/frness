@@ -1,5 +1,7 @@
 # Нормативные контракты
 
+Альтернативный CLI agent backend определён в [AGENT-BACKENDS.md](AGENT-BACKENDS.md) и standard-contracts.ts. Это plugin contract, не расширение host ABI и не неявная реализация LLM completion.
+
 Слова MUST, MUST NOT и SHOULD задают обязательность. contracts.ts фиксирует имена и формы wire DTO. Этот файл фиксирует семантику. Стандартные определения Type/Contract/Implementation и остальные DTO поставляются пакетами плагинов; наличие TypeScript interface не делает сущность встроенной в host.
 
 ## C01 JSON, схемы и ограничения

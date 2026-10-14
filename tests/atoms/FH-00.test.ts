@@ -19,7 +19,7 @@ test("AT-000 all planned workspaces exist with unique identities", async () => {
     assert.equal(names.has(manifest.name), false);
     names.add(manifest.name);
   }
-  assert.equal(names.size, 22);
+  assert.equal(names.size, 23);
 });
 
 test("AT-000 toolchain and strict compiler settings are fixed", async () => {

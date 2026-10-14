@@ -75,6 +75,51 @@ export interface Tab {
 }
 export interface TabLayout { readonly tabs: readonly ObjectRef[]; readonly activeTab: ObjectRef | null }
 export interface Head { readonly current: ObjectRef }
+/** Backend plugin data; CLI agents do not implement ModelCompletion by shape. */
+export interface AgentBackendCapabilities {
+  readonly streaming: boolean;
+  readonly resume: boolean;
+  readonly reconcileTurn: boolean;
+  readonly permissions: boolean;
+  readonly interrupt: "turn" | "session" | "none";
+  readonly nativeFork: boolean;
+  readonly usage: "reported" | "unavailable";
+  readonly enforceableLimits: readonly string[];
+}
+export interface NativeAgentSession {
+  readonly adapter: DefinitionRef;
+  readonly configuration: VersionedObjectRef;
+  readonly workspace: VersionedObjectRef;
+  readonly nativeHandle: string | null;
+  readonly metadata: Json;
+  readonly activeTurnId: string | null;
+  readonly eventCursor: string | null;
+}
+export interface AgentTurnInput {
+  readonly session: VersionedObjectRef;
+  readonly clientTurnId: string;
+  readonly prompt: string;
+  readonly sources: readonly VersionedObjectRef[];
+}
+export type AgentRuntimeEvent = {
+  readonly eventId: string;
+  readonly clientTurnId: string;
+  readonly nativeTurnId: string | null;
+} & (
+  | { readonly kind: "session"; readonly nativeHandle: string; readonly metadata: Json }
+  | { readonly kind: "text"; readonly delta: string }
+  | { readonly kind: "tool"; readonly toolId: string; readonly phase: "started" | "completed"; readonly value: Json }
+  | { readonly kind: "permission"; readonly requestId: string; readonly actionDigest: string; readonly options: readonly { readonly id: string; readonly title: string }[]; readonly value: Json }
+  | { readonly kind: "usage"; readonly inputTokens: number | null; readonly outputTokens: number | null }
+  | { readonly kind: "terminal"; readonly status: "completed" | "failed" | "cancelled" | "unknown"; readonly result: Json; readonly errorCode: string | null }
+);
+export interface AgentPermissionDecision {
+  readonly session: VersionedObjectRef;
+  readonly clientTurnId: string;
+  readonly requestId: string;
+  readonly actionDigest: string;
+  readonly optionId: string;
+}
 export interface CreateInput { readonly value: Json }
 export interface UpdateInput { readonly object: ObjectRef; readonly expectedRevision: Revision; readonly value: Json }
 export interface AppendInput { readonly object: ObjectRef; readonly expectedRevision: Revision; readonly child: ObjectRef }

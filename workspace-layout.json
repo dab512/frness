@@ -12,6 +12,7 @@
     { "name": "@frness/llm", "path": "plugins/llm" },
     { "name": "@frness/tools", "path": "plugins/tools" },
     { "name": "@frness/agent", "path": "plugins/agent" },
+    { "name": "@frness/agent-runtime", "path": "plugins/agent-runtime" },
     { "name": "@frness/memory", "path": "plugins/memory" },
     { "name": "@frness/ui", "path": "plugins/ui" },
     { "name": "@frness/question-answer", "path": "plugins/question-answer" },

@@ -11,6 +11,7 @@
    Начальная загрузка и seed: [BOOTSTRAP.md](BOOTSTRAP.md).
 3. [Исполнение, эффекты и восстановление](RUNTIME.md).
    Предметные пакеты: [STANDARD-PLUGINS.md](STANDARD-PLUGINS.md) и [их типы](standard-contracts.ts).
+   Альтернативные исполнительные ядра: [AGENT-BACKENDS.md](AGENT-BACKENDS.md).
 4. [Интерфейс, данные и ветвление](UI-AND-DATA.md).
    Обновление каждого плагина без restart: [HOT-RELOAD.md](HOT-RELOAD.md).
 5. [Ревью и устранённые неоднозначности](REVIEW.md).

@@ -9,6 +9,7 @@
 | Основание | FH-00…FH-06 | Bootstrap, метамодель, linker, собственные данные плагинов и атомарная активация. |
 | Исполнение | FH-07…FH-14 | Durable invocation, effects, recovery, бюджет, управление, replay и общий API/CLI. |
 | Агент | FH-15…FH-18 | LLM, инструменты, проверяемый цикл и память. |
+| CLI backend | FH-31 после FH-14, до FH-28 | Готовые CLI-агенты, native sessions/turns, permissions, streaming и recovery; CLI-only профиль без LLM. |
 | Интерфейс и организация | FH-19…FH-25 | Вложенные UI-плагины, вопрос–ответ, история, сессии, вкладки, проекты, форки и миграции. |
 | Hot reload | FH-30 после FH-27, до FH-28 | Замена каждого пакета без restart, с переносом состояния, pinned generations и rollback. |
 | Приёмка | FH-26…FH-29 | Независимые расширения, эксплуатация, полная автоматическая и живая проверка. |
@@ -24,6 +25,7 @@
     plugins/execution            Request/Invocation/Effect/Attempt/recovery/control
     plugins/api                  generic transport и subscriptions
     plugins/llm                  provider contracts и адаптер
+    plugins/agent-runtime        внешние CLI/SDK/RPC агенты и native sessions
     plugins/tools                инструментальные типы и router
     plugins/agent                decision loop и verifier
     plugins/memory               recall/remember/provenance
@@ -70,4 +72,4 @@ Done атома = все steps + AT gate + local dev scenario, указанны�
 
 ## Ресурсы и оценка
 
-План содержит 31 атом; это не оценка в часах. После FH-03 и FH-10 измерить фактический throughput по завершённым атомам, включая исправления после тестов, и пересчитать прогноз. Срок по одному лишь количеству файлов не назначать. Главные риски по трудозатратам — bootstrap, crash recovery, UI plugin bundling и hot reload. IDs стабильны; порядок определяется dependencies, поэтому FH-30 выполняется до финальных FH-28/FH-29.
+План содержит 32 атома; это не оценка в часах. После FH-03 и FH-10 измерить фактический throughput по завершённым атомам, включая исправления после тестов, и пересчитать прогноз. Срок по одному лишь количеству файлов не назначать. Главные риски по трудозатратам — bootstrap, crash recovery, UI plugin bundling, внешний CLI lifecycle и hot reload. IDs стабильны; порядок определяется dependencies, поэтому FH-30/FH-31 выполняются до финальных FH-28/FH-29.

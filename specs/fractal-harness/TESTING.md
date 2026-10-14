@@ -4,6 +4,8 @@
 
 ## Исполняемый набор
 
+CLI backend: [CLI-001…CLI-010](AGENT-BACKENDS.md) дополняют эту матрицу. CLI-001…009 обязательны для FH-28; живая CLI-010 — для FH-29.
+
 tests/acceptance.test.mjs содержит 14 black-box тестов. Адаптер реализует acceptance-api.ts в packages/acceptance-adapter. Команда: FRACTAL_SUT_MODULE=/absolute/path/to/packages/acceptance-adapter/dist/index.js npm run test:acceptance из этой папки. Без адаптера ожидается IMPLEMENTATION_MISSING и ненулевой код, а не skipped/green.
 
 Эти 14 тестов не заменяют остальные сценарии. Все группы ниже и все @RT/@UI в feature files обязательны для final gate. Будущий исполнитель реализует их в соответствующих package tests либо Playwright, сохраняя IDs в названиях. Отдельный файл tests/FIXTURES.md задаёт реальные fixture-пакеты и внешний процесс fake remote.

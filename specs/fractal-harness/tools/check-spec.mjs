@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Parser, AstBuilder, GherkinClassicTokenMatcher } from "@cucumber/gherkin";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const documents = ["README.md", "ARCHITECTURE.md", "BOOTSTRAP.md", "CONTRACTS.md", "STANDARD-PLUGINS.md", "HOT-RELOAD.md", "RUNTIME.md", "UI-AND-DATA.md", "REVIEW.md", "PLAN.md", "HANDOFF.md", "TESTING.md", "tests/FIXTURES.md"];
+const documents = ["README.md", "ARCHITECTURE.md", "BOOTSTRAP.md", "CONTRACTS.md", "STANDARD-PLUGINS.md", "AGENT-BACKENDS.md", "HOT-RELOAD.md", "RUNTIME.md", "UI-AND-DATA.md", "REVIEW.md", "PLAN.md", "HANDOFF.md", "TESTING.md", "tests/FIXTURES.md"];
 const texts = new Map();
 for (const name of documents) {
   const text = await readFile(resolve(root, name), "utf8");
@@ -17,8 +17,8 @@ for (const name of documents) {
   }
 }
 const known = new Set();
-for (const text of [texts.get("TESTING.md"), texts.get("BOOTSTRAP.md")]) {
-  for (const match of text.matchAll(/^\|\s*`?((?:META|STORE|AG|OPS|BOOT)-\d{3})`?\s*\|/gm)) known.add(match[1]);
+for (const text of [texts.get("TESTING.md"), texts.get("BOOTSTRAP.md"), texts.get("AGENT-BACKENDS.md")]) {
+  for (const match of text.matchAll(/^\|\s*`?((?:META|STORE|AG|OPS|BOOT|CLI)-\d{3})`?\s*\|/gm)) known.add(match[1]);
 }
 let scenarioCount = 0;
 let expandedCount = 0;
@@ -43,7 +43,7 @@ for (const name of ["tests/runtime.feature", "tests/ui.feature", "tests/hot-relo
 }
 const plan = JSON.parse(await readFile(resolve(root, "plan.json"), "utf8"));
 assert.equal(plan.format, 1);
-assert.equal(plan.atoms.length, 31);
+assert.equal(plan.atoms.length, 32);
 const atoms = new Map(plan.atoms.map((atom) => [atom.id, atom]));
 assert.equal(atoms.size, plan.atoms.length, "duplicate atom ID");
 const gateFile = JSON.parse(await readFile(resolve(root, "atomic-gates.json"), "utf8"));
