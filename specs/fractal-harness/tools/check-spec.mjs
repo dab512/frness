@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Parser, AstBuilder, GherkinClassicTokenMatcher } from "@cucumber/gherkin";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const documents = ["README.md", "ARCHITECTURE.md", "BOOTSTRAP.md", "CONTRACTS.md", "STANDARD-PLUGINS.md", "RUNTIME.md", "UI-AND-DATA.md", "REVIEW.md", "PLAN.md", "HANDOFF.md", "TESTING.md", "tests/FIXTURES.md"];
+const documents = ["README.md", "ARCHITECTURE.md", "BOOTSTRAP.md", "CONTRACTS.md", "STANDARD-PLUGINS.md", "HOT-RELOAD.md", "RUNTIME.md", "UI-AND-DATA.md", "REVIEW.md", "PLAN.md", "HANDOFF.md", "TESTING.md", "tests/FIXTURES.md"];
 const texts = new Map();
 for (const name of documents) {
   const text = await readFile(resolve(root, name), "utf8");
@@ -22,7 +22,7 @@ for (const text of [texts.get("TESTING.md"), texts.get("BOOTSTRAP.md")]) {
 }
 let scenarioCount = 0;
 let expandedCount = 0;
-for (const name of ["tests/runtime.feature", "tests/ui.feature"]) {
+for (const name of ["tests/runtime.feature", "tests/ui.feature", "tests/hot-reload.feature"]) {
   let id = 0;
   const text = await readFile(resolve(root, name), "utf8");
   const parser = new Parser(new AstBuilder(() => `${name}:${id++}`), new GherkinClassicTokenMatcher());
@@ -32,8 +32,8 @@ for (const name of ["tests/runtime.feature", "tests/ui.feature"]) {
     if (!child.scenario) continue;
     const scenario = child.scenario;
     const tags = scenario.tags.map((tag) => tag.name.slice(1));
-    assert.ok(tags.some((tag) => /^(RT|UI)-\d{3}$/.test(tag)), `${name}: missing scenario ID`);
-    for (const tag of tags) if (/^(RT|UI)-\d{3}$/.test(tag)) known.add(tag);
+    assert.ok(tags.some((tag) => /^(RT|UI|HR)-\d{3}$/.test(tag)), `${name}: missing scenario ID`);
+    for (const tag of tags) if (/^(RT|UI|HR)-\d{3}$/.test(tag)) known.add(tag);
     assert.ok(scenario.steps.some((step) => step.keyword.trim() === "Then"), `${name}: no oracle`);
     scenarioCount++;
     if (scenario.examples.length) {
@@ -43,7 +43,7 @@ for (const name of ["tests/runtime.feature", "tests/ui.feature"]) {
 }
 const plan = JSON.parse(await readFile(resolve(root, "plan.json"), "utf8"));
 assert.equal(plan.format, 1);
-assert.equal(plan.atoms.length, 30);
+assert.equal(plan.atoms.length, 31);
 const atoms = new Map(plan.atoms.map((atom) => [atom.id, atom]));
 assert.equal(atoms.size, plan.atoms.length, "duplicate atom ID");
 const gateFile = JSON.parse(await readFile(resolve(root, "atomic-gates.json"), "utf8"));

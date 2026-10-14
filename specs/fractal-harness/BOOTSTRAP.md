@@ -6,7 +6,7 @@
 
 Host понимает только bootstrap manifest, JSON, точные ссылки, загрузку проверенного ESM export, регистрацию технического валидатора/ABI adapter и capability handles. Он не знает `Request`, `Invocation`, `Session`, статусы исполнения или предметные операции.
 
-`boot-lock.json` — доверенный файл поставки приложения. Runtime-плагин и операция установки обычного плагина не могут его изменить. Изменение boot-lock выполняется обновлением поставки и требует нового старта процесса. В v1 нет замены bootstrap ABI работающего host.
+`boot-lock.json` — доверенный исходный lock поставки приложения. Обычный плагин не может его произвольно изменить. Lifecycle reload публикует новый проверенный generation lock через технический supervisor по HOT-RELOAD.md; совместимые seed/bridge пакеты с тем же hostAbi обновляются без restart. Изменение низкоуровневого hostAbi требует новой поставки процесса. Active generation lock и исходный boot-lock различаются; crash recovery читает подтверждённый active pointer и pinned locks старых исполнений.
 
 Bootstrap не скачивает пакеты, схемы, зависимости или код. Все артефакты уже находятся локально. ESM bundles стандартных мостов не имеют побочных действий на уровне module import. Их activation регистрирует технические обработчики и не запускает LLM, инструменты, таймеры или предметные операции.
 
@@ -53,6 +53,7 @@ type SourceDefinitionRef = DefinitionRef | { readonly local: string };
 
 1. В `SourceDefinitionRecord.metaType`.
 2. В позициях значения определения, чья метасхема помечает значение аннотацией `x-definition-ref: true`.
+3. В известной позиции manifest.reload.snapshotType; остальные reload metadata не преобразуются как ссылки.
 
 Resolver не ищет произвольные объекты с ключом `local` по всему JSON. Содержимое `TypeDefinition.schema` — данные схемы, а не автоматически обрабатываемый payload этой схемы. Например, literal `default: {local: "example"}` внутри схемы не преобразуется.
 
@@ -114,7 +115,7 @@ Bridge package предоставляет форму загрузки и про�
 
 Реестр ABI разделён по environment. Серверный react descriptor проверяет метаданные и доступность client export; он не рендерит компонент. Browser shell получает уже проверенные definitions и bundles от локального сервера, исполняет только client activations и не импортирует Node-код. В browser документе один экземпляр React через закреплённый import map.
 
-Неизвестный ABI, повторная регистрация занятых validator/ABI ID либо попытка изменить существующий adapter отклоняются. Не-bootstrap пакет не получает registration capability, даже если объявляет export с именем `activateMeta`.
+Неизвестный ABI, повторная регистрация занятых validator/ABI ID в одной generation либо попытка изменить существующий adapter in-place отклоняются. Candidate generation получает отдельный registry; те же ABI IDs там разрешены при compatible hostAbi. Не-bootstrap пакет не получает registration capability, даже если объявляет export с именем `activateMeta`.
 
 ## 6. Технический activation ABI
 
@@ -157,7 +158,7 @@ Browser выполняет отдельную candidate activation только 
 - `store.v1` проверяет контракт store adapter. Atomic storage profile и реальные транзакционные гарантии проверяются storage conformance suite. Имя ABI не доказывает, что backend поддерживает durable profile.
 - `react-view.v1` загружает client renderer и передаёт ограниченный view context. Слоты принадлежат только ImplementationDefinition. ViewDefinition содержит `targetType`, `propsType`, `implementation`; ViewMount связывает `viewInstanceId` и `assemblyRevision`. Renderer разрешает дочерние слоты через обычные bindings закреплённой UI assembly; bootstrap не знает имён slot.
 
-Изменение декларации ABI в данных не меняет эти правила. Новый технический ABI требует нового allowlisted bridge и новой boot-поставки. Новый предметный тип, операция, слот или renderer при существующем ABI не требует изменения host.
+Изменение декларации ABI в данных не меняет эти правила. Новый технический ABI требует нового allowlisted bridge и проверенного candidate lock; при прежнем hostAbi он может активироваться hot reload. Новый предметный тип, операция, слот или renderer при существующем ABI не требует изменения host.
 
 ## 9. Детерминированный приоритет ошибок
 

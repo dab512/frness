@@ -9,10 +9,10 @@
 | Установка закреплённых dev dependencies без install scripts | Успешно; package-lock.json сохранён. |
 | TypeScript strict/noEmit для contracts.ts, standard-contracts.ts, acceptance-api.ts | Exit 0. |
 | check-spec: локальные ссылки документов | Все проверенные цели существуют. |
-| check-spec: DAG реализации | 30 атомов; неизвестных зависимостей и циклов нет. |
-| check-spec: отдельные AT gates | 30 уникальных проверок с given/when/then, по одной на атом. |
-| check-spec: traceability | 97 полных тестовых групп назначены атомам; неизвестных IDs нет. |
-| Официальный Gherkin parser | 67 Scenario/Scenario Outline, 120 случаев с учётом Examples; синтаксис корректен. |
+| check-spec: DAG реализации | 31 атом; неизвестных зависимостей и циклов нет. |
+| check-spec: отдельные AT gates | 31 уникальная проверка с given/when/then, по одной на атом. |
+| check-spec: traceability | 109 полных тестовых групп назначены атомам; неизвестных IDs нет. |
+| Официальный Gherkin parser | 79 Scenario/Scenario Outline, 145 случаев с учётом Examples; синтаксис корректен. |
 | node --check для acceptance.test.mjs и check-spec.mjs | Exit 0. |
 | Исполняемый black-box набор без SUT | Ожидаемый exit 1 с IMPLEMENTATION_MISSING; ноль skipped. |
 | Межфайловой аудит контрактов | Устранены конфликты ссылок/digest, DTO, idempotency scope, UI slots, init state, repository calls и per-atom gates. |

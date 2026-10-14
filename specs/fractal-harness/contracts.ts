@@ -22,12 +22,18 @@ export type ContractRef = DefinitionRef;
 export type ImplementationRef = DefinitionRef;
 /** Local references exist only in immutable source packages, before their digest is known. */
 export type SourceDefinitionRef = DefinitionRef | { readonly local: string };
+export interface PackageReloadDefinition {
+  readonly snapshotType: SourceDefinitionRef;
+  readonly serverEntry: string | null;
+  readonly clientEntry: string | null;
+}
 
 export interface PackageManifest {
   readonly format: 1;
   readonly packageId: string;
   readonly version: string;
   readonly hostAbi: "fractal.host.v1";
+  readonly reload: PackageReloadDefinition;
   readonly dependencies: readonly DefinitionRef[];
   readonly definitions: readonly SourceDefinitionRecord[];
   readonly exports: Readonly<Record<string, { readonly path: string; readonly exportName: string; readonly environment: "server" | "client" }>>;
@@ -233,6 +239,31 @@ export interface MigrationPlan {
   readonly destination: ObjectRef;
   readonly implementation: ImplementationRef;
   readonly planDigest: Digest;
+}
+/** Reload data is provided by the lifecycle plugin; generation IDs are opaque. */
+export interface ReloadRequest {
+  readonly expectedGenerationId: Id;
+  readonly candidateLock: BootLock;
+  readonly idempotencyKey: string;
+}
+export interface ReloadSnapshot { readonly type: TypeRef; readonly value: Json }
+export interface ReloadReceipt {
+  readonly reloadId: Id;
+  readonly previousGenerationId: Id;
+  readonly activeGenerationId: Id;
+  readonly retiredGenerationIds: readonly Id[];
+}
+export interface ReloadContext {
+  readonly generationId: Id;
+  readonly packageId: string;
+  readonly instanceIds: readonly Id[];
+  readonly resourceIds: readonly Id[];
+}
+export interface ReloadParticipant {
+  capture(context: ReloadContext): Promise<ReloadSnapshot>;
+  restore(snapshot: ReloadSnapshot, context: ReloadContext): Promise<void>;
+  ready(context: ReloadContext): Promise<void>;
+  dispose(context: ReloadContext): Promise<void>;
 }
 
 /** UI plugin contracts. A mount never owns its target object. */

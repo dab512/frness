@@ -66,7 +66,7 @@ tests/acceptance.test.mjs содержит 14 black-box тестов. Адапт
 
 ## Полный gate
 
-BOOT-001…012 из BOOTSTRAP.md; META-001…010, STORE-001…008, AG-001…010, OPS-001…008, RT-001…025 и UI-001…024. Scenario Outline исполняется для каждой строки Examples; все дополнительные Scenario с тем же ID тоже обязательны.
+BOOT-001…012 из BOOTSTRAP.md; META-001…010, STORE-001…008, AG-001…010, OPS-001…008, RT-001…025, UI-001…024 и HR-001…012 из tests/hot-reload.feature. Scenario Outline исполняется для каждой строки Examples; все дополнительные Scenario с тем же ID тоже обязательны. Hot reload gate FH-30 предшествует final FH-28.
 
 Запрещено объединять crash before/after commit в один happy-path тест. Счётчики transport calls и remote mutations проверяются раздельно. Gherkin фиксирует ожидаемое поведение; adapter и step bindings не имеют права возвращать готовые ожидаемые значения.
 

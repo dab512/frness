@@ -12,6 +12,7 @@
 3. [Исполнение, эффекты и восстановление](RUNTIME.md).
    Предметные пакеты: [STANDARD-PLUGINS.md](STANDARD-PLUGINS.md) и [их типы](standard-contracts.ts).
 4. [Интерфейс, данные и ветвление](UI-AND-DATA.md).
+   Обновление каждого плагина без restart: [HOT-RELOAD.md](HOT-RELOAD.md).
 5. [Ревью и устранённые неоднозначности](REVIEW.md).
 6. [Пошаговый план](PLAN.md).
    Машинный DAG: [plan.json](plan.json); точные проверки этапов: [atomic-gates.json](atomic-gates.json).

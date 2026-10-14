@@ -22,6 +22,8 @@ packageId: lowercase сегменты латиницы/цифр, разделё�
 
 ## C03 Bootstrap и метамодель
 
+PackageManifest.reload обязателен: snapshotType (source full/local ref), serverEntry/clientEntry (имена exports либо null). Для каждого присутствующего environment существует reload participant. Snapshot и hooks определены в HOT-RELOAD.md; stateless snapshot.value=null. Registry/ABI adapters и loader resources generation-scoped; обновление in-place опубликованного определения запрещено. ReloadRequest/ReloadReceipt — типы lifecycle-плагина, не host domain classes.
+
 Встроенный host ABI знает только generic records, ссылки, вызов exports и capability handles. Двухпроходный bootstrap: встроенная ограниченная схема проверяет seed → загруженный meta-validator проверяет собственные определения через стандартный API. Seed pinned by digest. Отсутствие/порча seed — fail before plugin activation, без создания предметных сущностей.
 
 Минимальные определения meta-пакета: Type, Contract, Implementation, Slot, Instance, Binding, Assembly. Type описывает данные; Contract — именованные операции с точными input/output TypeRef, declared errors, effects и conformance suite; Implementation — код/композицию с config/state schemas, slots, ABI и capabilities. Новые предметные типы регистрируются как DefinitionRecord и не требуют добавления switch case в host.
@@ -133,5 +135,7 @@ Clone переназначает внутренние owned refs, reference со
 BOOTSTRAP_PACKAGE_MISSING, DIGEST_MISMATCH, DEFINITION_CONFLICT, PINNED_DEPENDENCY_MISSING, UNKNOWN_ABI, INVALID_INPUT, INVALID_OUTPUT, INVALID_COMMAND_BATCH, INVALID_TRANSITION, NON_JSON_VALUE, PAYLOAD_TOO_LARGE, CONTRACT_MISMATCH, UNKNOWN_SLOT, SLOT_CARDINALITY, DUPLICATE_SLOT_KEY, DUPLICATE_SLOT_ORDER, MULTIPLE_OWNERS, OWNERSHIP_CYCLE, UNREACHABLE_INSTANCE, CAPABILITY_DENIED, OBJECT_EXISTS, NOT_FOUND, REVISION_CONFLICT, IDEMPOTENCY_CONFLICT, EVENT_CONFLICT, COMPLETION_CONFLICT, DEPENDENCY_UNAVAILABLE, UNSUPPORTED_SCHEMA_VERSION, PLUGIN_DISABLED, LIVE_REFERENCES, VIEW_UNAVAILABLE, CURSOR_EXPIRED, SNAPSHOT_UNAVAILABLE, FORK_UNSUPPORTED, CHECKPOINT_NOT_FORKABLE, WRITER_ALREADY_RUNNING, BUDGET_EXCEEDED, INVALID_USAGE, EXTERNAL_OUTCOME_UNKNOWN, INCOMPLETE_RESPONSE, VERIFICATION_REJECTED, VERIFICATION_INCONCLUSIVE, REPLAY_DIVERGENCE.
 
 Bootstrap errors принадлежат ABI; остальные error definitions поставляются стандартными пакетами. Нельзя возвращать success с error внутри произвольного объекта вместо объявленного failure. retryable означает возможность повторить запрос по правилам, не разрешение автоматически повторить неизвестный внешний effect.
+
+Hot reload errors: RELOAD_PREPARE_FAILED — capture/restore/ready/compile не прошёл; RELOAD_LIMIT_EXCEEDED — новая generation превышает допустимое удержание ресурсов. Ошибка до publication сохраняет прежнюю active generation и данные. Семантика полного reload protocol — HOT-RELOAD.md.
 
 Дополнительные коды: REDUCER_EXECUTION_FAILED — исключение чистой initialize/reduce; CANCELLED_BEFORE_DISPATCH — доказанная локальная отмена prepared attempt до разрешения транспорта.

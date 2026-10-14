@@ -8,7 +8,8 @@
 
 - [Начать с пакета спецификаций](specs/fractal-harness/README.md).
 - [Архитектура](specs/fractal-harness/ARCHITECTURE.md) и [контракты](specs/fractal-harness/CONTRACTS.md).
-- [План реализации](specs/fractal-harness/PLAN.md): 30 этапов с зависимостями.
+- [План реализации](specs/fractal-harness/PLAN.md): 31 этап с зависимостями.
+- [Hot reload каждого плагина](specs/fractal-harness/HOT-RELOAD.md).
 - [Инструкция исполнителю](specs/fractal-harness/HANDOFF.md).
 - [Поэтапная приёмка](specs/fractal-harness/atomic-gates.json) и [полная тестовая матрица](specs/fractal-harness/TESTING.md).
 
