@@ -1,4 +1,5 @@
 import type { DefinitionRef, PackageManifest } from "../../../packages/abi/src/index.js";
+import { effectSchemas } from "./effects.js";
 import { executionSchemas } from "./schemas.js";
 
 export function executionManifest(meta: (name: string) => DefinitionRef): PackageManifest {
@@ -10,10 +11,12 @@ export function executionManifest(meta: (name: string) => DefinitionRef): Packag
     dependencies: [meta("Type")],
     reload: { snapshotType: meta("NullSnapshot"), serverEntry: "reload", clientEntry: null },
     exports: { reload: { path: "server.mjs", exportName: "reload", environment: "server" } },
-    definitions: Object.entries(executionSchemas).map(([name, schema]) => ({
-      name,
-      metaType: meta("Type"),
-      value: { schema, references: {} },
-    })),
+    definitions: Object.entries({ ...executionSchemas, ...effectSchemas }).map(
+      ([name, schema]) => ({
+        name,
+        metaType: meta("Type"),
+        value: { schema, references: {} },
+      }),
+    ),
   };
 }

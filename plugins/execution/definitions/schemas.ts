@@ -20,7 +20,7 @@ export const objectRef = object({
   type: definitionRef,
 });
 export const operationRef = object({ contract: definitionRef, operation: string });
-const error = object({
+export const error = object({
   code: string,
   message: { type: "string" },
   details: json,

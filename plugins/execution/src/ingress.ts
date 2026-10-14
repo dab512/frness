@@ -22,6 +22,7 @@ import type {
   ReducerModule,
   TypeRef,
 } from "../../../specs/fractal-harness/contracts.js";
+import type { CrashCut, DurableOutbox } from "./outbox.js";
 import { executionError, initialize, type ReducerValidation, transition } from "./reducer.js";
 
 interface RegistryCapability {
@@ -37,6 +38,8 @@ export interface ExecutionOptions {
   readonly types: (name: string) => TypeRef;
   readonly assembly: (revision: string) => Assembly;
   readonly reducer: (implementation: DefinitionRef) => ReducerModule;
+  readonly outbox?: DurableOutbox;
+  readonly cut?: (point: CrashCut) => Promise<void>;
 }
 interface InvocationState {
   invocation: ObjectRef;
@@ -326,8 +329,11 @@ export class ExecutionService {
           (state.pendingCommands.length || snapshot.unresolvedEffectIds.length)
         )
           throw executionError("INVALID_COMMAND_BATCH", "Completion has unfinished work");
-        if (command.kind === "effect")
-          throw executionError("UNKNOWN_ABI", "Effect bridge is not installed");
+        if (command.kind === "effect") {
+          if (!this.#options.outbox)
+            throw executionError("UNKNOWN_ABI", "Effect bridge is not installed");
+          this.#options.outbox.validate(resolved.assembly, request, invocation, command);
+        }
         if ("commandId" in command && state.issuedCommands.includes(command.commandId))
           throw executionError("INVALID_COMMAND_BATCH", "Command identity was already issued");
       }
@@ -378,14 +384,27 @@ export class ExecutionService {
       } else if (command.kind === "awaitInput") {
         next.phase = "waiting";
         next.waitingReason = "input";
+      } else if (command.kind === "effect") {
+        next.phase = "waiting";
+        next.waitingReason = "effect";
       }
     }
     const pending = result.commands.flatMap((command) =>
       "commandId" in command ? [command.commandId] : [],
     );
+    const effects = (await this.#options.outbox?.prepare(
+      resolved.assembly,
+      request,
+      invocation,
+      result.commands,
+    )) ?? { writes: [], readSet: [] };
+    if (effects.writes.length) await this.#options.cut?.("before_prepare_commit");
     await this.#options.store.commit(this.#options.context, {
       commitKey: `step/${inbox.event.eventId}`,
-      readSet: [{ object: requestRecord.object, revision: requestRecord.revision }],
+      readSet: [
+        { object: requestRecord.object, revision: requestRecord.revision },
+        ...effects.readSet,
+      ],
       events: [],
       writes: [
         {
@@ -417,8 +436,11 @@ export class ExecutionService {
           object: this.#associated("Commands", invocation, inboxId),
           value: json({ invocation, eventId: inbox.event.eventId, commands: result.commands }),
         },
+        ...effects.writes,
       ],
     });
+    if (effects.writes.length) await this.#options.cut?.("after_prepare_commit");
+    else await this.#options.cut?.("after_reduce_commit");
   }
   async startChild(
     parent: ObjectRef,

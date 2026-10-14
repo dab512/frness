@@ -15,7 +15,31 @@ export const writer = {
   execute: ({ effect }) => request("execute", effect),
   reconcile: ({ effect }) => request("reconcile", effect),
 };
-export const parent = { initialize: () => ({}), reduce: (state) => ({ state, commands: [] }) };
+export const parent = {
+  initialize: () => ({}),
+  reduce(state, event) {
+    if (event.type.name === "EffectCompleted")
+      return { state, commands: [{ kind: "complete", output: event.value.output }] };
+    if (event.type.name === "EffectFailed")
+      return { state, commands: [{ kind: "fail", error: event.value.error }] };
+    return {
+      state,
+      commands: [
+        {
+          kind: "effect",
+          commandId: "write",
+          adapterInstanceId: "connected",
+          operation: {
+            contract: { ...event.value.operation.contract, name: "Write" },
+            operation: "run",
+          },
+          input: event.value.input,
+          maxUnits: 0,
+        },
+      ],
+    };
+  },
+};
 export function suite() {
   return true;
 }
