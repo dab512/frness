@@ -9,7 +9,7 @@ export function backendManifest(
   return {
     format: 1,
     packageId: "std.execution-backend",
-    version: "1.0.1",
+    version: "1.0.2",
     hostAbi: "fractal.host.v1",
     dependencies: [
       meta("Type"),

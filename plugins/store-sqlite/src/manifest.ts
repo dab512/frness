@@ -5,7 +5,7 @@ export function storageManifest(meta: (name: string) => DefinitionRef): PackageM
   return {
     format: 1,
     packageId: "std.store-sqlite",
-    version: "1.0.0",
+    version: "1.0.1",
     hostAbi: "fractal.host.v1",
     dependencies: [meta("Type")],
     reload: { snapshotType: meta("NullSnapshot"), serverEntry: "reload", clientEntry: null },

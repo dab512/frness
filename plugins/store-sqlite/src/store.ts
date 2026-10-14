@@ -14,6 +14,7 @@ import type {
   TypeRef,
   VersionedObjectRef,
 } from "../../../specs/fractal-harness/contracts.js";
+import { namespaceGrant } from "./access.js";
 import type { StorageSubscription } from "./subscriptions.js";
 
 interface Namespace {
@@ -89,14 +90,19 @@ export class SqliteObjectStore implements ObjectStore {
       .run(id, owner, scope);
   }
 
-  #authorize(context: ExecutionContext, ref: ObjectRef): void {
+  #authorize(
+    context: ExecutionContext,
+    ref: ObjectRef,
+    permission: "read" | "write" = "write",
+  ): void {
     if (ref.storeId !== this.storeId) fail("CAPABILITY_DENIED", "Store is not accessible");
     const namespace = this.#db
       .prepare("SELECT owner,scope FROM namespaces WHERE id=?")
       .get(ref.namespaceId) as Namespace | undefined;
     if (
       !namespace ||
-      namespace.owner !== context.ownerInstanceId ||
+      (namespace.owner !== context.ownerInstanceId &&
+        !context.grants.includes(namespaceGrant(this.storeId, ref.namespaceId, permission))) ||
       namespace.scope !== context.scopeId
     )
       fail("CAPABILITY_DENIED", "Namespace is not accessible");
@@ -112,7 +118,7 @@ export class SqliteObjectStore implements ObjectStore {
   }
 
   async read(context: ExecutionContext, ref: ObjectRef, revision?: string): Promise<ObjectRecord> {
-    this.#authorize(context, ref);
+    this.#authorize(context, ref, "read");
     const head = this.#head(ref);
     if (!head || (revision === undefined && head.deleted))
       fail("NOT_FOUND", "Object does not exist");
@@ -134,12 +140,16 @@ export class SqliteObjectStore implements ObjectStore {
   subscribe(input: ExecutionContext, namespaceId: string): StorageSubscription {
     const context = structuredClone(input);
     const authorize = () =>
-      this.#authorize(context, {
-        storeId: this.storeId,
-        namespaceId,
-        objectId: "",
-        type: {} as TypeRef,
-      });
+      this.#authorize(
+        context,
+        {
+          storeId: this.storeId,
+          namespaceId,
+          objectId: "",
+          type: {} as TypeRef,
+        },
+        "read",
+      );
     authorize();
     let closed = false;
     const check = () => {
@@ -279,7 +289,7 @@ export class SqliteObjectStore implements ObjectStore {
           fail("INVALID_OUTPUT", "Schema capability must validate synchronously or throw");
       }
     }
-    for (const reference of batch.readSet) this.#authorize(context, reference.object);
+    for (const reference of batch.readSet) this.#authorize(context, reference.object, "read");
     for (const event of batch.events) {
       if (!event.eventId) fail("INVALID_INPUT", "Event ID is required");
       assertJson(event.value);

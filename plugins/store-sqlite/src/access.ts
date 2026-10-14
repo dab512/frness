@@ -1,5 +1,14 @@
-import { assertJson } from "../../../packages/abi/src/json.js";
+import { assertJson, canonicalJson } from "../../../packages/abi/src/json.js";
 import type { Json } from "../../../specs/fractal-harness/contracts.js";
+
+/** Issued by native authority; this token is never taken from repository request input. */
+export function namespaceGrant(
+  storeId: string,
+  namespaceId: string,
+  permission: "read" | "write",
+): string {
+  return `namespace:${canonicalJson([storeId, namespaceId, permission])}`;
+}
 
 function isObject(value: Json): value is { readonly [key: string]: Json } {
   return value !== null && typeof value === "object" && !Array.isArray(value);

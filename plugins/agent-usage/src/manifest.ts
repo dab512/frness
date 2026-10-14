@@ -23,7 +23,7 @@ export function usageManifest(
   return {
     format: 1,
     packageId: "std.agent-usage",
-    version: "1.0.0",
+    version: "1.0.1",
     hostAbi: "fractal.host.v1",
     dependencies: [
       meta("Type"),

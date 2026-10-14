@@ -9,7 +9,7 @@ export function providerManifest(
   return {
     format: 1,
     packageId: `std.agent-${provider}`,
-    version: "1.0.0",
+    version: "1.0.1",
     hostAbi: "fractal.host.v1",
     dependencies: [meta("Type"), lookup("std.agent-runtime", "ProviderTransport")],
     reload: { snapshotType: meta("NullSnapshot"), serverEntry: "reload", clientEntry: null },

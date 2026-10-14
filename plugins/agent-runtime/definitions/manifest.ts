@@ -126,7 +126,7 @@ export function agentRuntimeManifest(
   return {
     format: 1,
     packageId: "std.agent-runtime",
-    version: "1.0.0",
+    version: "1.0.1",
     hostAbi: "fractal.host.v1",
     dependencies: [meta("Type"), lookup("std.api", "Backend"), lookup("std.store-sqlite", "Store")],
     reload: { snapshotType: meta("NullSnapshot"), serverEntry: "reload", clientEntry: null },
