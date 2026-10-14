@@ -1,5 +1,5 @@
 /** Data shapes supplied by standard plugins, not exported as domain classes by host. */
-import type { DefinitionRef, Json, ObjectRef, OperationRef, ProtocolError, Revision, TypeRef, VersionedObjectRef } from "./contracts.js";
+import type { DefinitionRef, Json, ObjectRecord, ObjectRef, OperationRef, ProtocolError, Revision, TypeRef, VersionedObjectRef } from "./contracts.js";
 
 export interface Message {
   readonly role: "system" | "user" | "assistant" | "tool";
@@ -120,7 +120,7 @@ export interface AgentPermissionDecision {
 }
 /** Optional addon contracts. Backend records contain no usage counters or limit policy. */
 export type AgentLaunchDecision = { readonly kind: "allow" } | { readonly kind: "deny"; readonly error: ProtocolError };
-export interface AgentObservedEvent { readonly session: ObjectRef; readonly event: VersionedObjectRef }
+export interface AgentObservedEvent { readonly session: ObjectRef; readonly event: ObjectRecord }
 export interface AgentUsageSample { readonly source: VersionedObjectRef; readonly unit: string; readonly amount: number | null }
 export interface CreateInput { readonly value: Json }
 export interface UpdateInput { readonly object: ObjectRef; readonly expectedRevision: Revision; readonly value: Json }

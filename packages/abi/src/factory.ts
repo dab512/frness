@@ -11,9 +11,11 @@ export interface NativeService {
 }
 export interface FactoryContext {
   readonly instance: ComponentInstance;
+  readonly assemblyRevision: string;
   readonly registry: DefinitionReader;
   readonly implementation: DefinitionRef;
   child(slot: string): unknown;
+  children(slot: string): readonly unknown[];
   capability(name: string): unknown;
   exported(implementation: DefinitionRef): unknown;
 }

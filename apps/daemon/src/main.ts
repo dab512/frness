@@ -23,7 +23,7 @@ export interface DaemonProfile {
   readonly bootstrapDirectory: string;
   readonly dataDirectory: string;
   readonly services: Assembly;
-  readonly application: Assembly;
+  readonly application?: Assembly;
   readonly principalId: string;
   readonly grants: Readonly<Record<string, readonly string[]>>;
   readonly credentials: Readonly<
@@ -52,9 +52,11 @@ export async function startDaemon(
     const services = new Linker(registry as DefinitionRegistry, assemblyType, grants).validate(
       profile.services,
     );
-    const application = new Linker(registry as DefinitionRegistry, assemblyType, grants).validate(
-      profile.application,
-    );
+    const application = profile.application
+      ? new Linker(registry as DefinitionRegistry, assemblyType, grants).validate(
+          profile.application,
+        )
+      : undefined;
     await mkdir(profile.dataDirectory, { recursive: true });
     const instances = new Map<string, NativeService>();
     const implementation = (ref: DefinitionRef) =>
@@ -75,6 +77,7 @@ export async function startDaemon(
       for (const binding of children) await instantiate(binding.childInstanceId);
       const context: FactoryContext = {
         instance,
+        assemblyRevision: services.revision,
         registry,
         implementation: instance.implementation,
         exported,
@@ -85,6 +88,13 @@ export async function startDaemon(
               code: "SLOT_CARDINALITY",
             });
           return instances.get(bindings[0]!.childInstanceId)!.value;
+        },
+        children(slot) {
+          if (!definition.slots.some((entry) => entry.name === slot))
+            throw Object.assign(new Error("Unknown slot"), { code: "UNKNOWN_SLOT" });
+          return children
+            .filter((binding) => binding.slot === slot)
+            .map((binding) => instances.get(binding.childInstanceId)!.value);
         },
         capability(name) {
           if (!effective.includes(name))
@@ -127,6 +137,12 @@ export async function startDaemon(
     return {
       value: root.value,
       generation,
+      service(id: string): unknown {
+        const service = instances.get(id);
+        if (!service)
+          throw Object.assign(new Error("Service is not installed"), { code: "NOT_FOUND" });
+        return service.value;
+      },
       async close() {
         if (closed) return;
         closed = true;

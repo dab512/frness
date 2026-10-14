@@ -18,6 +18,7 @@
     "boot:build": "tsx tools/build-bootstrap.mjs",
     "boot:inspect": "tsx tools/inspect-bootstrap.mjs",
     "runtime:build": "tsx tools/build-runtime.mjs",
+    "cli:build": "tsx tools/build-cli.mjs",
     "daemon": "tsx apps/daemon/src/main.ts",
     "frness": "tsx apps/cli/src/main.ts",
     "progress": "node tools/progress.mjs",
