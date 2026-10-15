@@ -10,6 +10,7 @@ process.on("message", async (message: unknown) => {
     workspace: string;
     provider: "codex" | "claude";
     prompt: string;
+    mode?: "default" | "workspace";
     session?: ObjectRef;
     extension?: string;
     executable?: string;
@@ -28,6 +29,7 @@ process.on("message", async (message: unknown) => {
       workspace: input.workspace,
       provider: input.provider,
       prompt: input.prompt,
+      ...(input.mode ? { mode: input.mode } : {}),
       ...(input.session ? { session: input.session } : {}),
       ...(input.executable ? { executable: input.executable } : {}),
       ...(extension ? { extension } : {}),

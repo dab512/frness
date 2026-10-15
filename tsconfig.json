@@ -1,4 +1,11 @@
 {
   "extends": "./tsconfig.base.json",
-  "include": ["packages/**/*.ts", "plugins/**/*.ts", "apps/**/*.ts", "tests/**/*.ts"]
+  "include": [
+    "packages/**/*.ts",
+    "plugins/**/*.ts",
+    "apps/**/*.ts",
+    "tests/**/*.ts",
+    "extensions/**/*.ts",
+    "tools/plugin-template/**/*.ts"
+  ]
 }

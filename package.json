@@ -33,7 +33,8 @@
     "test:acceptance": "npm run test:acceptance --workspace fractal-harness-specification",
     "verify": "node tools/verify.mjs",
     "desktop": "node tools/desktop.mjs",
-    "test:desktop": "tsx --test tests/desktop/*.test.ts"
+    "test:desktop": "tsx --test tests/desktop/*.test.ts",
+    "plugin": "tsx apps/cli/src/plugins.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

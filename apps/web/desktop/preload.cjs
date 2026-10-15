@@ -1,5 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("frness", {
+  plugin: () => ipcRenderer.invoke("frness:plugin"),
+  reload: () => ipcRenderer.invoke("frness:reload"),
   state: () => ipcRenderer.invoke("frness:state"),
   workspace: () => ipcRenderer.invoke("frness:workspace"),
   newSession: () => ipcRenderer.invoke("frness:new"),

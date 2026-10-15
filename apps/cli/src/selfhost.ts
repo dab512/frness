@@ -10,6 +10,7 @@ import { objectRef } from "../../../plugins/api/src/protocol.js";
 import type { DefinitionRef, ObjectRef } from "../../../specs/fractal-harness/contracts.js";
 import { buildCli } from "../../../tools/build-cli.mjs";
 import { type DaemonProfile, startDaemon } from "../../daemon/src/main.js";
+import { workspaceLease } from "./lease.js";
 
 export interface SelfhostExtension {
   packages: NonNullable<Parameters<typeof buildCli>[1]>["packages"];
@@ -18,16 +19,19 @@ export interface SelfhostExtension {
     ref: (packageId: string, name: string) => DefinitionRef;
   }): DaemonProfile;
 }
-export async function selfhost(options: {
+export interface SelfhostOptions {
   workspace: string;
   provider: "codex" | "claude";
   prompt: string;
   executable?: string;
+  mode?: "default" | "workspace";
   extension?: SelfhostExtension;
   session?: ObjectRef;
   signal?: AbortSignal;
   output?: (text: string) => void;
-}) {
+  profile?: DaemonProfile;
+}
+export async function prepareSelfhost(options: SelfhostOptions): Promise<DaemonProfile> {
   const workspace = resolve(options.workspace);
   const directory = join(workspace, ".frness", "selfhost");
   await mkdir(join(directory, "builds"), { recursive: true });
@@ -79,7 +83,10 @@ export async function selfhost(options: {
           {
             instanceId: "provider",
             implementation: ref(`std.agent-${options.provider}`, "Transport"),
-            configuration: options.executable ? { executable: options.executable } : {},
+            configuration: {
+              ...(options.executable ? { executable: options.executable } : {}),
+              ...(options.mode && options.provider === "codex" ? { mode: options.mode } : {}),
+            },
             stateNamespaceId: "provider",
             scopeId: "local",
           },
@@ -101,6 +108,64 @@ export async function selfhost(options: {
   } finally {
     await generation.close();
   }
+  return profile;
+}
+export async function selfhost(options: SelfhostOptions) {
+  const release = await workspaceLease(options.workspace);
+  let result;
+  try {
+    result = await runSelfhost(options);
+  } finally {
+    await release();
+  }
+  const { applyPendingPlugin } = await import("./plugins.js");
+  const pluginUpdate =
+    result.phase === "completed" ? await applyPendingPlugin(options.workspace) : null;
+  return { ...result, pluginUpdate };
+}
+async function runSelfhost(options: SelfhostOptions) {
+  let installed: DaemonProfile | undefined;
+  if (!options.extension && !options.profile) {
+    try {
+      installed = JSON.parse(
+        await readFile(join(resolve(options.workspace), ".frness/plugins/active.json"), "utf8"),
+      ).profiles[options.provider];
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    }
+  }
+  if (options.mode && options.provider !== "codex" && options.mode !== "default")
+    throw new Error("Unsupported provider mode");
+  let profile = options.profile ?? installed ?? (await prepareSelfhost(options));
+  if ((options.mode && options.provider === "codex") || options.executable) {
+    const services = {
+      ...profile.services,
+      instances: profile.services.instances.map((item) =>
+        item.instanceId === "provider"
+          ? {
+              ...item,
+              configuration: {
+                ...(item.configuration as Record<string, string>),
+                ...(options.mode && options.provider === "codex" ? { mode: options.mode } : {}),
+                ...(options.executable ? { executable: options.executable } : {}),
+              },
+            }
+          : item,
+      ),
+    };
+    profile = {
+      ...profile,
+      services: {
+        ...services,
+        revision: createHash("sha256").update(canonicalJson(services)).digest("hex"),
+      },
+    };
+  }
+  const directory = join(resolve(options.workspace), ".frness", "selfhost");
+  const implementation = profile.services.instances.find(
+    (item) => item.instanceId === "cli",
+  )!.implementation;
+  const ref = (_packageId: string, name: string) => ({ ...implementation, name });
   const daemon = await startDaemon(profile);
   const backend = daemon.value as ApiBackend & { idle(): Promise<void> };
   try {
@@ -163,6 +228,7 @@ export async function selfhostCli(args: string[]) {
     "executable",
     "extension",
     "session-file",
+    "mode",
   ]);
   for (let i = 0; i < args.length; i += 2) {
     const key = args[i]?.slice(2);
@@ -179,6 +245,8 @@ export async function selfhostCli(args: string[]) {
   }
   const provider = flags.get("provider") ?? "codex";
   if (provider !== "codex" && provider !== "claude") throw new Error("Invalid provider");
+  const mode = flags.get("mode");
+  if (mode && !["default", "workspace"].includes(mode)) throw new Error("Invalid provider mode");
   const promptFile = flags.get("prompt-file");
   if (!promptFile) throw new Error("--prompt-file is required");
   const extensionPath = flags.get("extension");
@@ -196,6 +264,7 @@ export async function selfhostCli(args: string[]) {
     const result = await selfhost({
       workspace: flags.get("workspace") ?? process.cwd(),
       provider,
+      ...(mode ? { mode: mode as "default" | "workspace" } : {}),
       prompt: await readFile(promptFile, "utf8"),
       ...(extension ? { extension } : {}),
       ...(session ? { session } : {}),
@@ -204,7 +273,11 @@ export async function selfhostCli(args: string[]) {
       output: (text) => process.stdout.write(text),
     });
     process.stderr.write(`\nFRNESS: ${result.phase}; .frness/selfhost/last-run.json\n`);
-    if (result.phase !== "completed") process.exitCode = 1;
+    if (result.pluginUpdate)
+      process.stderr.write(
+        `Plugins: ${result.pluginUpdate.ok ? result.pluginUpdate.revision : result.pluginUpdate.message}\n`,
+      );
+    if (result.phase !== "completed" || result.pluginUpdate?.ok === false) process.exitCode = 1;
   } finally {
     process.off("SIGINT", interrupt);
   }

@@ -15,6 +15,8 @@
 <div><label>Рабочая папка</label><button id="workspace" class="folder" title="Выбрать рабочую папку">Выбрать папку</button></div>
 <div><label for="provider">Агент</label><select id="provider"><option value="codex">Codex</option><option value="claude">Claude Code</option></select></div>
 </section>
+<section class="permission"><label for="mode">Разрешения на следующий запуск</label><select id="mode"><option value="default">Штатные разрешения Codex</option></select><p id="mode-description"></p></section>
+<section class="plugins"><button id="plugin" type="button">Подключить плагин</button> <button id="reload" type="button">Обновить плагины</button><details><summary id="plugin-status">Плагины не подключены</summary><pre id="plugin-tree"></pre></details></section>
 <div id="messages" role="log" aria-label="Диалог" aria-live="polite"></div>
 <section id="empty"><h1>С чего начнём?</h1><p>Задайте агенту небольшую задачу.<br>Он будет работать в выбранной папке.</p></section>
 <form id="composer"><label for="prompt">Ваш запрос</label><textarea id="prompt" rows="4" placeholder="Что нужно сделать?" required></textarea><div class="controls"><span id="hint">⌘ Enter — отправить</span><button id="stop" type="button" class="quiet" hidden>Остановить</button><button id="send" type="submit">Отправить</button></div></form>

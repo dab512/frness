@@ -9,6 +9,7 @@ import {
 export interface CodexConfiguration {
   readonly executable?: string;
   readonly model?: string;
+  readonly mode?: "default" | "workspace";
   readonly sandbox?: "read-only" | "workspace-write";
   readonly environment?: Readonly<Record<string, string>>;
 }
@@ -17,8 +18,13 @@ export function codexTransport(configuration: CodexConfiguration = {}): AgentTra
     capabilities: printCapabilities,
     plan(input) {
       const args = [
+        ...(configuration.mode === "workspace"
+          ? ["--ask-for-approval", "never", "-c", 'approvals_reviewer="user"']
+          : []),
         "--sandbox",
-        configuration.sandbox ?? "workspace-write",
+        configuration.mode === "workspace"
+          ? "workspace-write"
+          : (configuration.sandbox ?? "workspace-write"),
         "exec",
         ...(input.nativeHandle ? ["resume"] : []),
         "--json",

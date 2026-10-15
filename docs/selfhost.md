@@ -19,6 +19,8 @@ npm run selfhost -- --provider codex --workspace . --prompt-file NEXT.md --sessi
 
 Локальный доверенный модуль подключается через `--extension ./path/extension.ts`. Его default export реализует `SelfhostExtension` из apps/cli/src/selfhost.ts: `packages` добавляет метаописания и код, `extend({profile,ref})` добавляет экземпляры, bindings, namespaces и grants. Host менять не требуется. Модуль выполняет обычный код Node и имеет права пользователя.
 
-Минимальная сборка включает только метамодель, технические bridge-контракты, SQLite, CLI runtime и выбранный transport. Лимиты, статистика, managed LLM, память и UI не включаются. Полный hot reload ещё не реализован; подключение расширения применяется при новом запуске.
+Минимальная сборка включает только метамодель, технические bridge-контракты, SQLite, CLI runtime и выбранный transport. Лимиты, статистика, managed LLM, память и UI не включаются. Полный hot reload ещё не реализован; активная compiled-сборка расширения применяется к следующему turn после проверенного install/request, без рестарта Electron. Полный системный hot reload в активном invocation пока не реализован.
 
 Проверки bootstrap: fake CLI выполняет реальный OS-процесс; проверены continuation, interrupt, missing executable и подключение существующего observer через extension hook с записью в отдельный SQLite. Это проверка механизма расширения. Создание нового плагина live-агентом пока не подтверждено: Codex сообщил отказ командных инструментов; пробный Claude был отменён до правок. Политики разрешений CLI не изменены.
+
+Полный рабочий workflow разработки, writer lease, `plugin scaffold/install/request/status`, владение данными и границы reload описаны в одном [AGENT-GUIDE.md](../AGENT-GUIDE.md). CLI `--mode workspace` — явный выбор Codex never + workspace-write для данного запуска; global config не меняется.

@@ -9,7 +9,7 @@ export function providerManifest(
   return {
     format: 1,
     packageId: `std.agent-${provider}`,
-    version: "1.0.1",
+    version: provider === "codex" ? "1.0.2" : "1.0.1",
     hostAbi: "fractal.host.v1",
     dependencies: [meta("Type"), lookup("std.agent-runtime", "ProviderTransport")],
     reload: { snapshotType: meta("NullSnapshot"), serverEntry: "reload", clientEntry: null },
@@ -36,7 +36,10 @@ export function providerManifest(
               executable: { type: "string", minLength: 1 },
               model: { type: "string", minLength: 1 },
               ...(provider === "codex"
-                ? { sandbox: { enum: ["read-only", "workspace-write"] } }
+                ? {
+                    sandbox: { enum: ["read-only", "workspace-write"] },
+                    mode: { enum: ["default", "workspace"] },
+                  }
                 : {}),
               environmentBindings: {
                 type: "object",

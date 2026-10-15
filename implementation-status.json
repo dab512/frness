@@ -296,8 +296,8 @@
       "docs/desktop.md"
     ],
     "checks": {
-      "coreTests": 114,
-      "electronTests": 2,
+      "coreTests": 118,
+      "electronTests": 3,
       "lint": "passed",
       "typecheck": "passed",
       "spec": "passed",
@@ -305,8 +305,43 @@
     },
     "limitations": [
       "source checkout launcher; no packaged installer",
-      "UI slot renderer and hot reload deferred",
-      "live CLI tool permissions unchanged; UI tests use fake CLI"
+      "C09 UI renderer and system hot reload deferred",
+      "CLI interactive approval cards require a bidirectional adapter; not claimed by exec transport"
+    ]
+  },
+  "pluginDevelopment": {
+    "status": "bootstrap_workflow_verified",
+    "evidence": [
+      "AGENT-GUIDE.md",
+      "tools/plugin-template",
+      "extensions/turn-note",
+      "apps/cli/src/plugins.ts",
+      "tests/atoms/plugin-development.test.ts",
+      "tests/desktop/electron.test.ts"
+    ],
+    "checks": {
+      "coreTests": 118,
+      "electronTests": 3,
+      "pluginWorkflowTests": 4,
+      "lint": "passed",
+      "typecheck": "passed",
+      "spec": "passed",
+      "boundaries": "passed"
+    },
+    "verified": [
+      "recursive contract-preserving plugin tree with separate stores",
+      "SDK scaffold without overwriting source",
+      "immutable artifacts and version identity",
+      "idle reload without Electron restart",
+      "candidate failure preserves active pointer and old data",
+      "writer lease and deferred plugin request after successful turn",
+      "per-run provider mode selection without global policy changes"
+    ],
+    "liveAgentEdits": "not_verified: default native Codex tool approval backend failed; autonomous mode requires user selection in UI",
+    "notClaimed": [
+      "system plugin hot reload during active invocation",
+      "C09 recursive UI renderer",
+      "packaged installer"
     ]
   }
 }

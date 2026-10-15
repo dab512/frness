@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
+import { promisify } from "node:util";
 import Database from "better-sqlite3";
 import { type ElectronApplication, _electron as electron } from "playwright";
 
@@ -93,9 +95,15 @@ test("Electron runs FRNESS, continues sessions, renders inert text and survives 
   assert.ok(ready, "CLI process must be running before closing the window");
 
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.close());
-  const reopened = app.waitForEvent("window");
+  assert.equal(
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+    false,
+  );
   await app.evaluate(({ app }) => app.emit("activate"));
-  page = await reopened;
+  assert.equal(
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.isVisible()),
+    true,
+  );
   await page.waitForSelector("#stop:visible");
   await page.locator("#stop").click();
   await waitPhase(app, "Остановлено");
@@ -124,4 +132,89 @@ test("Electron surfaces an unavailable CLI and allows a new request", {
     ),
   );
   assert.equal(await page.locator("#send").isEnabled(), true);
+});
+
+test("Electron installs and reloads plugin generations, preserving prior generation on failure", {
+  timeout: 60_000,
+}, async (t) => {
+  const workspace = await mkdtemp(join(tmpdir(), "frness-electron-plugins-"));
+  const id = `desktop-${Date.now()}`;
+  const directory = resolve("extensions", id);
+  t.after(() => rm(workspace, { recursive: true, force: true }));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await promisify(execFile)(process.execPath, [
+    "--import",
+    "tsx",
+    "apps/cli/src/plugins.ts",
+    "scaffold",
+    id,
+  ]);
+  const app = await launch(workspace, resolve("tests/fixtures/agent-runner/codex"));
+  t.after(() => app.close());
+  const page = await app.firstWindow();
+  await page.waitForFunction(
+    () => document.getElementById("status")?.textContent === "Плагины готовы",
+  );
+  assert.equal(await page.locator("#mode").inputValue(), "default");
+  await page.selectOption("#mode", "workspace");
+  assert.match((await page.locator("#mode-description").textContent()) ?? "", /workspace-write/);
+  await app.evaluate(
+    ({ dialog }, path) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] });
+    },
+    join(directory, "extension.ts"),
+  );
+  await page.locator("#plugin").click();
+  await page.waitForFunction(() =>
+    Boolean(document.getElementById("plugin-status")?.textContent?.startsWith("Сборка")),
+  );
+  await page.waitForFunction(
+    () => document.getElementById("status")?.textContent === "Плагины готовы",
+  );
+  await page.locator("#prompt").fill("with-plugin");
+  await page.locator("#send").click();
+  await waitPhase(app, "Завершено");
+  assert.equal(await page.locator("#mode").inputValue(), "default");
+  const activePath = join(workspace, ".frness/plugins/active.json");
+  const first = await readFile(activePath, "utf8");
+  const source = join(directory, "extension.ts");
+  await writeFile(
+    source,
+    (await readFile(source, "utf8")).replace(`label: "${id}"`, 'label: "updated"'),
+  );
+  await page.locator("#reload").click();
+  await page.waitForFunction(
+    () => document.getElementById("status")?.textContent === "Плагины готовы",
+  );
+  assert.notEqual(await readFile(activePath, "utf8"), first);
+  await page.locator("#prompt").fill("reloaded");
+  await page.locator("#send").click();
+  await waitPhase(app, "Завершено");
+  const db = new Database(join(workspace, `.frness/selfhost/data/${id}.sqlite`), {
+    readonly: true,
+  });
+  try {
+    assert.deepEqual(
+      (
+        db.prepare("SELECT value FROM revisions WHERE object_id LIKE 'Note/%'").all() as {
+          value: string;
+        }[]
+      )
+        .map((x) => JSON.parse(x.value).label)
+        .sort(),
+      [id, "updated"].sort(),
+    );
+  } finally {
+    db.close();
+  }
+  const second = await readFile(activePath, "utf8");
+  await writeFile(source, "invalid !!!");
+  await page.locator("#reload").click();
+  await page.waitForFunction(() =>
+    document.getElementById("status")?.textContent?.startsWith("Плагин не подключён"),
+  );
+  assert.equal(await readFile(activePath, "utf8"), second);
+  await page.locator("#prompt").fill("after-error");
+  await page.locator("#send").click();
+  await waitPhase(app, "Завершено");
 });
