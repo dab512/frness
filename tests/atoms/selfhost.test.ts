@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { selfhost, selfhostCli } from "../../apps/cli/src/selfhost.js";
@@ -75,16 +76,54 @@ test("minimal selfhost interrupts only its own active turn", async (t) => {
   const workspace = await mkdtemp(join(tmpdir(), "frness-selfhost-cancel-"));
   t.after(() => rm(workspace, { recursive: true, force: true }));
   const abort = new AbortController();
-  const timer = setTimeout(() => abort.abort(), 1500);
-  t.after(() => clearTimeout(timer));
-  const result = await selfhost({
+  const running = selfhost({
     workspace,
     provider: "codex",
     prompt: "hold",
     executable,
     signal: abort.signal,
   });
-  assert.equal(result.phase, "cancelled");
+  let ready = false;
+  try {
+    for (let attempt = 0; attempt < 300 && !ready; attempt++) {
+      try {
+        await access(join(workspace, ".frness/selfhost/data/cli.sqlite"));
+        const db = new Database(join(workspace, ".frness/selfhost/data/cli.sqlite"), {
+          readonly: true,
+        });
+        try {
+          ready =
+            (
+              db
+                .prepare(
+                  "SELECT count(*) n FROM revisions WHERE object_id LIKE 'Event/%' AND json_extract(value, '$.event.value.type') = 'test.ready'",
+                )
+                .get() as { n: number }
+            ).n > 0;
+        } finally {
+          db.close();
+        }
+      } catch (error) {
+        if (
+          !(
+            error instanceof Error &&
+            "code" in error &&
+            (error.code === "ENOENT" ||
+              error.code === "SQLITE_CANTOPEN" ||
+              error.message.includes("no such table"))
+          )
+        )
+          throw error;
+      }
+      if (!ready) await setTimeout(50);
+    }
+    assert.ok(ready, "CLI must start before testing active-turn cancellation");
+    abort.abort();
+    assert.equal((await running).phase, "cancelled");
+  } finally {
+    abort.abort();
+    await running.catch(() => {});
+  }
 });
 
 test("selfhost extension adds metadata, logic and its own storage without host edits", async (t) => {
